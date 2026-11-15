@@ -21,7 +21,9 @@ class ImageFilesAdapter(
     private val onFileMount: (File) -> Unit,
     private val onFileDeleted: (File) -> Unit,
     private val onFileRenamed: (File, File) -> Unit,
-    private val onFileCompact: (File) -> Unit = {}
+    private val onFileCompact: (File) -> Unit = {},
+    /** 打开镜像内文件浏览器（查看/添加/删除/读出） */
+    private val onFileBrowse: (File) -> Unit = {}
 ) : RecyclerView.Adapter<ImageFilesAdapter.ViewHolder>() {
 
     var isSelectionMode: Boolean = false
@@ -110,6 +112,7 @@ class ImageFilesAdapter(
 
     private fun showPopupMenu(context: Context, anchorView: View, file: File) {
         val popup = PopupMenu(context, anchorView)
+        popup.menu.add(context.getString(R.string.browse_files))
         popup.menu.add("立即挂载")
 
         // 所有镜像都提供空间回收入口：
@@ -124,6 +127,10 @@ class ImageFilesAdapter(
 
         popup.setOnMenuItemClickListener { item ->
             when (item.title) {
+                context.getString(R.string.browse_files) -> {
+                    onFileBrowse(file)
+                    true
+                }
                 "立即挂载" -> {
                     onFileMount(file)
                     true

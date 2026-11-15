@@ -21,6 +21,8 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 > - **中文界面**：布局、对话框、菜单、通知全中文
 > - **释放未使用空间**：支持 FAT32 / exFAT / NTFS / ext4，MBR / GPT / 无分区表，多分区逐个处理，
 >   并带零块压缩（inode 表等零填充元数据也能压掉）
+> - **镜像内文件浏览**（2.4.2）：直接查看 / 添加 / 删除 / 读出镜像里的文件，
+>   内核挂载读写；NTFS 在无写驱动的老内核上落到内置只读解析器
 > - 修复：MediaStore 记录滞后导致文件管理器显示旧大小；裸盘镜像不被识别为稀疏
 > - 安装包在 [Releases](https://github.com/kanhuiji100/PhoneStick/releases) 下载（仓库内不存 APK）
 > - 与原版签名不同，覆盖安装前需先 `adb uninstall mingww64.phonestick`
@@ -34,9 +36,13 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 | 2.3.5 | 修复裸盘镜像不被识别为稀疏（`used > 0` 判定错误） |
 | 2.3.6 | 空间回收支持 exFAT / NTFS / ext4（初版，布局识别不全） |
 | 2.3.7 | 回收补全 GPT / 无分区表；修正 ext4 位图寻址与 GPT 头偏移 |
+| 2.4.0 | 多分区镜像逐个回收；回收入口对所有镜像开放 |
+| 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描；新增 `--stats` / `--map` 诊断 |
+| 2.4.2 | **镜像内文件浏览**：查看 / 添加 / 删除 / 读出 / 新建 / 重命名；内核 loop 挂载读写 + 内置 NTFS 只读解析器 |
 
 细节见 [`docs/handoff.md`](docs/handoff.md)（逐版本改动与实测数据）、
-[`docs/design.md`](docs/design.md)（稀疏镜像与打洞回收的方案论证）。
+[`docs/design.md`](docs/design.md)（稀疏镜像与打洞回收的方案论证）、
+[`docs/browse.md`](docs/browse.md)（镜像内文件浏览：两条数据通路、支持矩阵、离线验证）。
 
 ## Features
 
@@ -56,6 +62,10 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
   支持 **FAT32 / exFAT / NTFS / ext4**，分区布局支持 **MBR / GPT / 无分区表**。
 - **中文界面**：布局、对话框、菜单、通知全中文。
 - **容量与占用显示**：`8.00 GB · 已用 264 MB`、`2.00 GB · 未写入`。
+- **镜像内文件浏览**：`ImageFs` 抽象 + 两条通路 —— 内核 loop 挂载（读写，
+  FAT32 / exFAT / ext4，以及有驱动的 NTFS）与内置用户态只读解析器（老内核上的 NTFS）。
+  支持查看、导入、删除、导出、新建文件夹、重命名；与 USB gadget 互斥，
+  退出浏览页会自动恢复 U 盘挂载。
 
 ## Requirements
 

@@ -45,4 +45,35 @@
     <string name="image_reclaim_none">该镜像没有可释放的空间</string>
     <string name="image_reclaim_done">已释放 %1$s，现占用 %2$s</string>
     <string name="image_reclaim_failed">整理失败：%1$s</string>
+
+    <!-- 镜像内文件浏览 -->
+    <string name="browse_files">浏览文件</string>
+    <string name="browser_title">浏览镜像</string>
+    <string name="browser_add_file">导入文件</string>
+    <string name="browser_entry_icon">文件类型图标</string>
+    <string name="browser_more">更多操作</string>
+    <string name="browser_empty">此目录为空</string>
+    <string name="browser_refresh">刷新</string>
+    <string name="browser_readonly">只读：%1$s —— 该文件系统在内核里没有写入驱动，只能查看和读出（导出）。</string>
+    <string name="browser_readonly_toast">当前为只读模式，无法修改镜像内容</string>
+    <string name="browser_unmount_first">浏览前需要先卸载 U 盘</string>
+    <string name="browser_unmount_first_msg">该镜像正通过 USB 提供给电脑使用，内核不允同时对同一个文件做本地挂载。\n\n是否先卸载 U 盘，再浏览镜像里的文件？</string>
+    <string name="browser_unmount_and_open">卸载并浏览</string>
+    <string name="browser_open_failed">无法打开镜像</string>
+    <string name="browser_list_failed">读取目录失败</string>
+    <string name="browser_import_done">已写入 %1$d 个文件</string>
+    <string name="browser_import_failed">部分文件写入失败</string>
+    <string name="browser_export">导出到手机</string>
+    <string name="browser_export_done">已导出 %1$s</string>
+    <string name="browser_export_failed">导出失败</string>
+    <string name="browser_delete">删除</string>
+    <string name="browser_delete_msg">确定删除“%1$s”吗？文件夹会被递归删除，且不可恢复。</string>
+    <string name="browser_rename">重命名</string>
+    <string name="browser_new_folder">新建文件夹</string>
+    <string name="browser_name_hint">名称</string>
+    <string name="browser_name_empty">名称不能为空</string>
+    <string name="browser_create">创建</string>
+    <string name="browser_modify_failed">操作失败</string>
+    <string name="browser_info_title">镜像信息</string>
+    <string name="browser_info_body">文件系统：%1$s\n总容量：%2$s\n可用空间：%3$s\n访问方式：%4$s\n\n镜像路径：%5$s</string>
 </resources>

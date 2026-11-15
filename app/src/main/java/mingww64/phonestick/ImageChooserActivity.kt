@@ -240,7 +240,13 @@ class ImageChooserActivity : AppCompatActivity() {
                 }
                 loadImages()
             },
-            onFileCompact = { file -> reclaimSpace(file) }
+            onFileCompact = { file -> reclaimSpace(file) },
+            onFileBrowse = { file ->
+                startActivity(
+                    Intent(this, ImageBrowserActivity::class.java)
+                        .putExtra(ImageBrowserActivity.EXTRA_IMAGE_PATH, file.absolutePath)
+                )
+            }
         )
         adapter.onFileLongClick = { file ->
             enterFormatSelectionMode(initialSelectedFile = file)

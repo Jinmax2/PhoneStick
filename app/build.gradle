@@ -11,8 +11,8 @@ android {
         applicationId "mingww64.phonestick"
         minSdk 24
         targetSdk 34
-        versionCode 23
-        versionName "2.4.1"
+        versionCode 24
+        versionName "2.4.2"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -70,4 +70,25 @@ dependencies {
 
     // Root Library (TopJohnWu LibSu v6.0.0 / commit 8c3e80ffe4)
     implementation 'com.github.topjohnwu.libsu:core:6.0.0'
+
+    // libsu 的二进制 IO（SuRandomAccessFile / SuFileInputStream）在独立模块里。
+    // 镜像在 /data/media/0 下 app 读不到，浏览镜像内文件、解析文件系统都靠它。
+    implementation 'com.github.topjohnwu.libsu:io:6.0.0'
+
+    // 用户态文件系统解析器的单元测试（解析逻辑是纯 Kotlin，不需要真机）
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// 把镜像路径透传给单元测试：-Dps.test.image=fat32=/path/a.img
+tasks.withType(Test).configureEach {
+    systemProperty 'ps.test.image.fat32', System.getProperty('ps.test.image.fat32', '')
+    systemProperty 'ps.test.image.exfat', System.getProperty('ps.test.image.exfat', '')
+    systemProperty 'ps.test.image.ntfs', System.getProperty('ps.test.image.ntfs', '')
+    systemProperty 'ps.test.image.ext4', System.getProperty('ps.test.image.ext4', '')
+    systemProperty 'ps.test.image.ntfsnopt', System.getProperty('ps.test.image.ntfsnopt', '')
+    systemProperty 'ps.test.image.gpt', System.getProperty('ps.test.image.gpt', '')
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+        showStandardStreams = true
+    }
 }

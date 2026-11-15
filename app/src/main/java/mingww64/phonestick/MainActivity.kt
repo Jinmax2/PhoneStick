@@ -79,6 +79,10 @@ class MainActivity : AppCompatActivity() {
                     startActivity(Intent(this, LicenseActivity::class.java))
                     true
                 }
+                R.id.menu_browse_files -> {
+                    openImageBrowser()
+                    true
+                }
                 else -> false
             }
         }
@@ -102,6 +106,18 @@ class MainActivity : AppCompatActivity() {
         binding.btnUnmount.setOnClickListener {
             unmountGadget()
         }
+    }
+
+    /** 直接浏览当前选中镜像里的文件；镜像正被 LUN 占用时，浏览页会引导先卸载 */
+    private fun openImageBrowser() {
+        if (selectedImagePath.isEmpty()) {
+            Snackbar.make(binding.root, R.string.file_picker_nofile, Snackbar.LENGTH_SHORT).show()
+            return
+        }
+        startActivity(
+            Intent(this, ImageBrowserActivity::class.java)
+                .putExtra(ImageBrowserActivity.EXTRA_IMAGE_PATH, selectedImagePath)
+        )
     }
 
     private fun openImageChooser() {
