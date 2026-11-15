@@ -94,6 +94,19 @@ object ImageFsMount {
                     errors.append("${part.fs.label} ($type ${if (ro) "ro" else "rw"}): ${r.error}\n")
                 }
             }
+
+            // 再试一次"不带附加选项"的挂载：少数厂商驱动（如 ufsd）不认
+            // iocharset/umask 这类通用选项，带上就直接 EINVAL。
+            val plain = part.fs.mountTypes.firstOrNull() ?: continue
+            for (ro in booleanArrayOf(false, true)) {
+                if (!part.fs.maybeWritable && !ro) continue
+                val r = attemptMount(raw, part, plain, ro, optsOverride = "")
+                if (r.fs != null) {
+                    Log.d(TAG, "mounted " + part.fs.label + " without extra opts, ro=" + ro)
+                    return OpenResult.Ok(r.fs)
+                }
+                errors.append(part.fs.label + " (" + plain + " 无附加选项 " + (if (ro) "ro" else "rw") + "): " + r.error + "\n")
+            }
         }
 
         // ---------- 4. 内核完全没有驱动时，用内置解析器（只读） ----------
@@ -129,14 +142,17 @@ object ImageFsMount {
         image: String,
         part: VolumeLayout.Part,
         type: String,
-        readOnly: Boolean
+        readOnly: Boolean,
+        /** 传空串表示不加任何附加挂载选项 */
+        optsOverride: String? = null
     ): Attempt {
         val mnt = "$BASE/s${counter.incrementAndGet()}_${System.nanoTime() % 100000L}"
         val imgEsc = esc(image)
         val mntEsc = esc(mnt)
 
+        val extraOpts = optsOverride ?: part.fs.extraOpts
         val opts = StringBuilder(if (readOnly) "ro" else "rw")
-        if (part.fs.extraOpts.isNotEmpty()) opts.append(',').append(part.fs.extraOpts)
+        if (extraOpts.isNotEmpty()) opts.append(',').append(extraOpts)
 
         val script = arrayOf(
             "mkdir -p '$mntEsc' 2>/dev/null",
