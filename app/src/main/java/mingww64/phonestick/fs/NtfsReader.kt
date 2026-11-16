@@ -308,7 +308,9 @@ class NtfsReader(
         val rec = locate(path) ?: throw IOException("目录不存在：$path")
         if (!rec.isDir) throw IOException("不是目录：$path")
         return enumDir(rec)
-            .filter { !it.name.startsWith("$") }
+            // 跳过 NTFS 元文件（$MFT 之类）和索引里的自引用项（"." / ".."）；
+            // mkntfs 建的卷根目录里带一条 "."，不滤掉就会在界面里多出一行"."
+            .filter { it.name.isNotEmpty() && !it.name.startsWith("$") && it.name != "." && it.name != ".." }
             .map { FsEntry(it.name, it.isDir, it.size, it.mtime) }
     }
 

@@ -272,14 +272,18 @@ class MountedImageFs(
         val dir = abs(rel)
         // stat 的格式串：%f=模式(hex) %s=大小 %Y=修改时间 %n=名字
         // 这里用字面量 \t 作分隔符：GNU stat 的 -c 不解释转义、toybox 的会，
-        // 解析侧两种都认（见下面 splitLine）。
+        // 解析侧两种都认（见 fs/StatLine.kt）。
         val fmt = "%f\\t%s\\t%Y\\t%n"
+        val dirEsc = esc(dir)
         val script = arrayOf(
+            // 【不要 cd 进目录】libsu 的 shell 是常驻进程，cd 之后 cwd 会一直留在
+            // 挂载点里，umount 之后内核仍认为有引用，loop 设备就摘不掉（实测残留）。
+            // 所以全部用绝对路径列目录，解析时再剥掉前缀。
+            "[ -d '" + dirEsc + "' ] || { echo __PS_CD_FAIL__; exit 0; }",
             // find -exec ... + 会自动分批，目录里几千个文件也不会撑爆参数长度；
             // 老 toybox 不支持 "+" 时回落到 shell 通配（目录项较少时足够）
-            "cd '${esc(dir)}' 2>/dev/null || { echo __PS_CD_FAIL__; exit 0; }",
-            "find . -mindepth 1 -maxdepth 1 -exec stat -c '$fmt' {} + 2>/dev/null || " +
-                "stat -c '$fmt' -- .[!.]* ..?* * 2>/dev/null || true",
+            "find '" + dirEsc + "' -mindepth 1 -maxdepth 1 -exec stat -c '" + fmt + "' {} + 2>/dev/null || " +
+                "stat -c '" + fmt + "' -- '" + dirEsc + "'/.[!.]* '" + dirEsc + "'/..?* '" + dirEsc + "'/* 2>/dev/null || true",
             "echo __PS_END__"
         )
         val res = try {
@@ -290,10 +294,12 @@ class MountedImageFs(
         if (res.out.any { it == "__PS_CD_FAIL__" }) {
             throw IOException("无法进入目录：${ImageFs.normalize(rel)}")
         }
+        val prefix = "$dir/"
         val out = ArrayList<FsEntry>()
         for (raw in res.out) {
             if (raw == "__PS_END__") break
-            val entry = StatLine.toEntry(raw) ?: continue
+            // 绝对路径 → 相对名字（find 与通配两种形式输出的都是绝对路径）
+            val entry = StatLine.toEntry(raw.replace(prefix, "")) ?: continue
             out.add(entry)
         }
         return out
@@ -351,9 +357,13 @@ class MountedImageFs(
         if (closed) return
         closed = true
         try {
+            // 顺序很讲究：先 umount（lazy 兜底），再摘 loop。
+            // umount -l 只是把挂载从命名空间摘掉，内核里最后一个引用要等一小会儿，
+            // 立刻 losetup -d 会偶发 EBUSY（实测有残留 loop），所以带一次重试。
             Shell.cmd(
-                "umount -l '${esc(mountPoint)}' 2>/dev/null",
-                "losetup -d '$loopDevice' 2>/dev/null",
+                "umount '${esc(mountPoint)}' 2>/dev/null || umount -l '${esc(mountPoint)}' 2>/dev/null || true",
+                "sleep 0.2",
+                "losetup -d '$loopDevice' 2>/dev/null || { sleep 0.3; losetup -d '$loopDevice' 2>/dev/null; }",
                 "rmdir '${esc(mountPoint)}' 2>/dev/null",
                 "true"
             ).exec()

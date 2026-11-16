@@ -94,6 +94,7 @@ class FsReaderTest {
                 assertTrue("应有 big.bin，实际 $names", names.contains("big.bin"))
                 assertTrue("应有中文名文件，实际 $names", names.contains("中文名.txt"))
                 assertFalse("不应列出 \$MFT 之类的元文件，实际 $names", names.any { it.startsWith("$") })
+                assertFalse("不应出现 . / .. 自引用项，实际 $names", names.any { it == "." || it == ".." })
 
                 val hello = list.first { it.name == "hello.txt" }
                 assertFalse(hello.isDir)

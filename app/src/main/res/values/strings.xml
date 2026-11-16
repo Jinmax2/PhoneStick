@@ -67,7 +67,8 @@
     <string name="browser_export_done">已导出 %1$s</string>
     <string name="browser_export_failed">导出失败</string>
     <string name="browser_delete">删除</string>
-    <string name="browser_delete_msg">确定删除“%1$s”吗？文件夹会被递归删除，且不可恢复。</string>
+    <string name="browser_delete_msg">确定删除“%1$s”吗？该操作不可恢复。</string>
+    <string name="browser_delete_dir_msg">确定删除文件夹“%1$s”及其中的全部内容吗？该操作不可恢复。</string>
     <string name="browser_rename">重命名</string>
     <string name="browser_new_folder">新建文件夹</string>
     <string name="browser_name_hint">名称</string>

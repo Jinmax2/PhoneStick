@@ -132,12 +132,34 @@ docker run --rm -v "$PWD/PhoneStick:/work" -v "$PWD/.testdata:/testdata:ro" \
     -Dps.test.image.ntfsnopt=/testdata/ntfs-nopt.img -Dps.test.image.gpt=/testdata/gpt-fat32.img'
 ```
 
-## 八、真机待验证清单
+## 八、真机验证（2026-11-16）
 
-- [ ] FAT32 镜像：浏览 → 导入 → 删除 → 导出，回电脑能看到一致的内容；
-- [ ] exFAT 镜像同上（注意内核驱动名是 `exfat` 还是 `sdfat`，日志里有记录）；
-- [ ] ext4 镜像同上；
-- [ ] NTFS 镜像：内核能挂就读写，挂不上时确认落到内置解析器、只读横幅出现；
-- [ ] U 盘挂载中点"浏览文件" → 卸载确认 → 浏览 → 退出后电脑端盘符回来；
-- [ ] 浏览页里按返回键逐级上跳，根目录再返回退出；
-- [ ] 导入 1GB 以上大文件时观察内存（走流式，不应 OOM）。
+设备：Xiaomi 15（25102RKBEC / myron），Android 17（SDK 37），kernel 6.12.69，Magisk。
+`/proc/filesystems` 里只有 `vfat / msdos / exfat / ext4 / f2fs / erofs`，**没有 ntfs3 / ntfs** ——
+正好覆盖"内核无 NTFS 驱动"的降级路径。
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| FAT32（MBR）浏览、进目录 | ✅ | 列表 `dir1 / big.bin / hello.txt`，大小与时间正确 |
+| FAT32 导入（SAF 多选） | ✅ | 写入后 `grep -a` 镜像原始字节命中；列表立即刷新 |
+| FAT32 删除 | ✅ | 条目消失；PC 上 `fsck.vfat` 干净（5 files, 无错误） |
+| FAT32 读出（导出） | ✅ | 导出 28 B 文件，内容与镜像内一致 |
+| exFAT 浏览（中文文件名） | ✅ | `中文名.txt` 正常显示 |
+| exFAT 新建目录 / 重命名 | ✅ | `newfolder` → `renamed`；PC 上 `fsck.exfat` `clean. directories 3, files 4` |
+| ext4 浏览（含 lost+found） | ✅ | PC 上 `e2fsck -fn` 五个 pass 全过，无错误 |
+| GPT 分区镜像 | ✅ | `gpt-fat32.img` 正确识别 GPT 并挂载 |
+| NTFS（内核无驱动） | ✅ 降级只读 | 顶部只读横幅；内置解析器列出 `dir1 / big.bin / hello.txt / 中文名.txt` |
+| NTFS 读出 3 MiB 非驻留文件 | ✅ | 导出文件 md5 与镜像内一致（`9cd48a0e…`） |
+| 无分区表 NTFS（超级软盘） | ✅ | 列表正确 |
+| LUN 占用时浏览 | ✅ | 弹窗 → 卸载并浏览 → 退出后 U 盘自动挂回（主机 `lsblk` 恢复 `/dev/sdb`，`LABEL=PSTEST`） |
+| 退出后资源清理 | ✅ | 无残留 loop，`/data/local/tmp/.psfs` 为空 |
+
+### 真机才暴露的两个问题（已修）
+
+1. **NTFS 根目录多出一行 `.`**：mkntfs 建的卷索引里带一条自引用项，而解析器只滤了 `$` 开头的
+   元文件。现在 `.` / `..` 一并过滤，单测补了断言。
+2. **退出后残留 loop 设备**：`list()` 原来用 `cd <挂载点>` + 通配列目录，而 libsu 的 shell 是
+   **常驻进程**，cwd 一直留在挂载点里 → `umount` 之后内核仍认为有引用，`losetup -d` 只做"延迟摘除"，
+   loop 就挂在那儿。改成**绝对路径列目录 + 解析时剥前缀**后彻底干净。
+   另外要记住：App 的挂载在**应用私有 mount namespace** 里（Android 10+ 的 per-app namespace），
+   `adb shell mount` 看不到属正常，排查要用 `nsenter -t <pid> -m -- mount`。

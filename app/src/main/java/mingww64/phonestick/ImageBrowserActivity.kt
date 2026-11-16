@@ -403,7 +403,7 @@ class ImageBrowserActivity : AppCompatActivity() {
         }
         MaterialAlertDialogBuilder(this)
             .setTitle(getString(R.string.browser_delete))
-            .setMessage(getString(R.string.browser_delete_msg, entry.name))
+            .setMessage(getString(if (entry.isDir) R.string.browser_delete_dir_msg else R.string.browser_delete_msg, entry.name))
             .setPositiveButton(getString(R.string.browser_delete)) { _, _ ->
                 mutate { f.delete(ImageFs.child(currentPath, entry.name)) }
             }

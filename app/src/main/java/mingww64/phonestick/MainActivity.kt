@@ -70,6 +70,11 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         refreshStatus()
+        // 浏览页退出时会异步把 U 盘挂回去（umount 本地挂载 → 等 400ms → 写 LUN，
+        // mountImage 内部还要轮询 LUN 节点最多 5s），状态查询通常跑在它前面，
+        // 会看到"未挂载"。这里补两次延迟刷新，覆盖这条异步链路的耗时。
+        binding.root.postDelayed({ if (!isFinishing) refreshStatus() }, 1500)
+        binding.root.postDelayed({ if (!isFinishing) refreshStatus() }, 5000)
     }
 
     private fun setupListeners() {
