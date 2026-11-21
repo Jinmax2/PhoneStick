@@ -8,8 +8,6 @@
     <color name="md_theme_secondary">#50606E</color>
     <color name="md_theme_onSecondary">#FFFFFF</color>
     <color name="md_theme_surface">#FAFDFD</color>
-    <!-- 夜间模式状态栏/导航栏底色（values-night/styles.xml 引用） -->
-    <color name="md_theme_surface_dark">#17191C</color>
     <color name="md_theme_onSurface">#191C1E</color>
     <color name="md_theme_surfaceVariant">#DEE3EA</color>
     <color name="md_theme_onSurfaceVariant">#41474D</color>

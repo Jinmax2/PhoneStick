@@ -1,11 +1,14 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- 夜间模式：内容区仍由系统强制深色（MIUI/ColorOS）或 DayNight 兜底，
-         但状态栏/导航栏不再跟着反转——这里显式给深色底 + 浅色图标，
-         在"无强制反转"的 ROM（如 ColorOS）上也是正确的。 -->
+    <!-- 夜间模式：App 自带完整夜间调色板（values-night/colors.xml），这里把
+         状态栏/导航栏也指向同一个 surface 令牌——布局里 AppBarLayout 的
+         背景引用的也是它，状态栏和界面由同一变量决定，不会错位。
+         forceDarkAllowed=false 关掉 ROM 强制深色（MIUI/ColorOS），
+         避免它把已经正确的深色再反转一遍、产生色差。 -->
     <style name="Theme.PhoneStick" parent="Theme.Material3.DayNight.NoActionBar">
-        <item name="android:statusBarColor">@color/md_theme_surface_dark</item>
-        <item name="android:navigationBarColor">@color/md_theme_surface_dark</item>
+        <item name="android:statusBarColor">@color/md_theme_surface</item>
+        <item name="android:navigationBarColor">@color/md_theme_surface</item>
         <item name="android:windowLightStatusBar">false</item>
         <item name="android:windowLightNavigationBar" tools:targetApi="o_mr1">false</item>
+        <item name="android:forceDarkAllowed" tools:targetApi="q">false</item>
     </style>
 </resources>
