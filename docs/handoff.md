@@ -462,12 +462,31 @@ swy 残留目录的清理；顺带删了无调用的 `rebindUdc`。
 4. legacy `android_usb` 老框架：`android0` 是空壳（只有 state/uevent），
    纯残迹，不可用。
 
-**遗留谜题**：符号链接的 EPERM 是状态相关的——有一次完整成功后，
-跨重启/跨 SELinux permissive/清 LUN/模式切换后全部 EPERM；
-`magiskpolicy permissive` 后仍 EPERM 且无 AVC → 非 SELinux，是 vendor
-内核（sagit 4.4）configfs-usb 补丁的门控，开关条件未定位（需 ROM
-内核源码才能深挖）。App 的 configfs-direct 管线已实现：内核门开的
-开机周期内可正常挂载，门关时诚实报错。
+**遗留谜题（2026-11-22 子代理源码级调研后修订）**：符号链接的 EPERM
+是**按开机周期**的——上一次开机全程可用（完整链路 ✅），重启后所有
+操作 EPERM。已排除：SELinux（permissive 无 AVC）、DAC（uid 0）、
+绑定状态、链接名、LUN 内容、setprop/框架级模式切换（svc usb）、
+HAL 冻结（SIGSTOP）。
+
+**公开源码核验（11 棵 sagit/msm8998 内核树，逐行比对）**：
+LineageOS lineage-19.1/21、crDroid 14.0、CAF msm-4.4、MiCode 官方
+sagit-n/o/p-oss、MIUI stock 捕获内核及 7 个 fork——
+`config_usb_cfg_link` 只返回 EINVAL/EEXIST/PTR_ERR，`fs/configfs`
+三文件与主线 v4.4 字节相同，**没有任何公开树含 EPERM 门控**；
+defconfig 确认 `CONFIG_USB_CONFIGFS_MASS_STORAGE=y`（函数可创建）。
+→ 门控在 ROM 实际烧录的私有内核 build 里，形态推测为"条件注册/
+条件 stub 的 allow_link"，开关条件需 ROM 内核源码/内核源码 diff
+才能定位（ftrace kprobe 可一锤定音：trace configfs_symlink 与
+config_usb_cfg_link 判定门在哪一层）。
+
+**已落地的缓解（2.4.4）**：App 的 configfs-direct 管线在门开的开机
+周期内正常挂载（真机 ✅），门关时诚实报错；自建 ps0 gadget 树
+就地复用。参考实现：chenxiaolong/MSD（SIGSTOP gadget HAL、
+CONFIGFS_MAGIC 校验、绝对路径 symlink）、DriveDroid-fix Magisk
+模块（Razer Phone msm8998/4.4 实测成功的先例——**kernel 4.4 不是
+硬性障碍**）。MI 6 想稳定支持：刷公开树的干净内核（LineageOS
+lineage-21 或 crDroid 14.0 的 kernel），或重启碰运气（门按开机
+周期定）。
 
 MI 6 可稳定使用：镜像创建/浏览/读出/删除、空间回收、格式化。
 U 盘挂载：门开时可用的机型 + 一加 15 这类 HAL 原生支持的机型。
