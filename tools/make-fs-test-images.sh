@@ -48,9 +48,15 @@ make_image() {
   loop=$(losetup -fP --show "$img")
   CREATED_LOOPS="$CREATED_LOOPS $loop"
   local part="${loop}p1"
-  # 容器里没有 udev，内核只在 sysfs 里登记分区，设备节点要自己建
-  for _ in $(seq 1 50); do
+  # 容器里没有 udev，内核只在 sysfs 里登记分区，设备节点要自己建。
+  # 复用刚 detach 的 loop 时，内核的分区扫描可能不触发（GitHub runner
+  # 实测偶发）——每 10 轮强制 partprobe 重扫一次兜底。
+  local i
+  for i in $(seq 1 100); do
     [ -b "$part" ] && break
+    if [ $((i % 10)) = 0 ]; then
+      partprobe "$loop" 2>/dev/null || blockdev --rereadpt "$loop" 2>/dev/null || true
+    fi
     devno=$(cat "/sys/class/block/$(basename "$part")/dev" 2>/dev/null || true)
     if [ -n "${devno:-}" ]; then
       mknod "$part" b "${devno%%:*}" "${devno##*:}" 2>/dev/null || true
@@ -98,8 +104,11 @@ printf 'label: gpt\nstart=2048\n' | sfdisk -q "$GPT_IMG" >/dev/null
 sfdisk --part-type "$GPT_IMG" 1 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 >/dev/null 2>&1 || true
 LOOP=$(losetup -fP --show "$GPT_IMG")
 CREATED_LOOPS="$CREATED_LOOPS $LOOP"
-for _ in $(seq 1 50); do
+for i in $(seq 1 100); do
   [ -b "${LOOP}p1" ] && break
+  if [ $((i % 10)) = 0 ]; then
+    partprobe "$LOOP" 2>/dev/null || blockdev --rereadpt "$LOOP" 2>/dev/null || true
+  fi
   devno=$(cat "/sys/class/block/$(basename "${LOOP}p1")/dev" 2>/dev/null || true)
   [ -n "${devno:-}" ] && mknod "${LOOP}p1" b "${devno%%:*}" "${devno##*:}" 2>/dev/null || true
   sleep 0.1
