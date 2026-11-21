@@ -445,10 +445,26 @@ mass_storage 链接，与发现 B 的 K20 Pro 一致）——该分支由 Xiaomi
 保留它只会在挂载失败时多绕一条死路、误导排查。`unmountImage` 保留对老版本
 swy 残留目录的清理；顺带删了无调用的 `rebindUdc`。
 
-另记：MI 6 的 `/sys/class/android_usb/` 下有 `android1 / android2`（不是
-android0）——内核带着老 composite 框架，但 HAL 用的是 configfs。App 的
-sysfs 回退候选里只有 android0，这台机器上等于没有 sysfs 兜底；未做深挖，
-留作以后想给"HAL 忽略 mass_storage"机型加通路时的线索。
+**MI 6 最终定性（2026-11-22 深挖结论：不支持，App 层无解）**
+
+该机为类原生 ROM + Magisk。四条路全部验证堵死：
+
+1. `setprop sys.usb.config mass_storage,adb`：HAL/init 不处理 mass_storage
+   （`sys.usb.state` 停在 adb，类原生 ROM 普遍把这段从 init.rc 移除）；
+2. configfs 直建 gadget：往 `configs/b.1` 创建 function 符号链接
+   **内核级 EPERM**——跨重启、SELinux permissive（`magiskpolicy --live`
+   注入后仍 EPERM 且无 AVC 记录）、任意链接名、bound/unbound 全试过；
+   而 LUN 属性写入正常、UDC 写入会触发断连——vendor 内核对 gadget 树
+   加了写锁（高通 4.4 vendor 补丁）。过程中唯一一次链接成功无法复现，
+   判定为 HAL 配置切换瞬间的竞态窗口，不可依赖；
+3. 停止 `vendor.usb-hal-1-3` 接管 configfs：停止后 gadget 树所有权变为
+   shell:shell 且写入被锁，反而更糟；
+4. legacy `android_usb` 老框架：`android0` 是空壳（只有 state/uevent，
+   无 enable/functions/f_mass_storage），纯残迹，不可用。
+
+MI 6 可正常使用：镜像创建/浏览/读出/删除、空间回收、格式化——
+唯一不可用的是对外呈现 U 盘（硬件/ROM 限制，非 App bug）。
+U 盘功能请用一加 15 这类 HAL 支持 mass_storage 的机型。
 
 ### 2½. 真机全链路验证（一加 15 / PLK110，Android 17，kernel 6.12，KernelSU LKM）
 
