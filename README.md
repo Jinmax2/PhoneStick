@@ -14,7 +14,7 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 
 > **本仓库是 [`mingww64/PhoneStick`](https://github.com/mingww64/PhoneStick) 的个人分支（fork）。**
 > 上游基线为 `v2.3.1-beta`（2.3.0 系列），本分支在其之上修复了镜像位置、分区表、稀疏占用等问题，
-> 并做了中文化、空间回收等增强，当前版本 **2.4.3**（versionCode 25）。
+> 并做了中文化、空间回收等增强，当前版本 **2.4.4**（versionCode 26）。
 >
 > 主要增强：
 > - **稀疏镜像**：`truncate` 秒建，物理占用随写入增长（4GB 约 2 秒，8GB 实测 126MB）
@@ -41,6 +41,7 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 | 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描；新增 `--stats` / `--map` 诊断 |
 | 2.4.2 | **镜像内文件浏览**：查看 / 添加 / 删除 / 读出 / 新建 / 重命名；内核 loop 挂载读写 + 内置 NTFS 只读解析器 |
 | 2.4.3 | 修复挂载状态误报（`lun.0/file` 有残留也报已挂载）；删除从未成功过的自建 ConfigFS gadget 兜底路径；修复浅色模式下状态栏图标反色不可见 |
+| 2.4.4 | **configfs 直接管线**：HAL 不支持 mass_storage 的 ROM（MI 6 类原生等）也可挂载（自动恢复 MTP 回退、解绑→链接→重绑）；状态栏/标题栏/内容区颜色统一（含滚动）；FAB 扁平化；格式化模式等 6 处英文残留汉化；CI 测试镜像改偏移挂载 |
 
 细节见 [`docs/handoff.md`](docs/handoff.md)（逐版本改动与实测数据）、
 [`docs/design.md`](docs/design.md)（稀疏镜像与打洞回收的方案论证）、

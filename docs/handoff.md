@@ -1,7 +1,7 @@
-# PhoneStick 开发交接（更新至 2.4.3）
+# PhoneStick 开发交接（更新至 2.4.4）
 
 > 设备：Redmi K20 Pro (raphael)，Android 17 / SDK 37，kernel 4.14.357，Magisk 31.1
-> 工程：`PhoneStick/` 2.4.3（versionCode 25）
+> 工程：`PhoneStick/` 2.4.4（versionCode 26）
 > 交付：APK 只发 GitHub Releases（仓库内不存 APK，也没有本地 `交付/` 目录）
 > 配套：`README.md`（总览）、`docs/browse.md`（镜像内文件浏览的方案与验证）。
 > 注意：早年的 `动态镜像研究.md` / `排查报告.md` / `Windows迁移调试指南.md` /
@@ -10,7 +10,7 @@
 
 ---
 
-## 零、当前状态（2.4.3）
+## 零、当前状态（2.4.4）
 
 | 项目 | 状态 |
 |---|---|
@@ -43,6 +43,7 @@
 | 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描（inode 表/保留 GDT 可压缩）；新增 --stats/--map 诊断 |
 | 2.4.2 | **镜像内文件浏览**：查看/添加/删除/读出/新建/重命名；内核 loop 挂载读写 + 无驱动时内置 NTFS 只读解析器；与 USB gadget 互斥处理（退出后自动恢复挂载） |
 | 2.4.3 | 挂载状态误报修复（P2）；删除 Strategy 2 兜底与死代码；F-Droid 元数据移除；GitHub Actions CI；pstrim 主机侧回归脚本；删 `tools/pstrim.c` 旧副本；浅色模式状态栏图标反色修复 |
+| 2.4.4 | **configfs 直接管线**（HAL 不支持 mass_storage 的 ROM 可挂载，MTP 回退自动恢复）；状态栏/标题栏/内容区颜色统一（滚动不变色）；FAB 扁平化；6 处英文残留汉化；CI 测试镜像改偏移挂载 |
 
 > 以下「一 ～ 十二」按时间顺序保留了每一轮的排查过程与实测数据，
 > 结论仍然有效，但**当前状态以本节为准**。
