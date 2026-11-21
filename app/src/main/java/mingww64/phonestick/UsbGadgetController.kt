@@ -238,7 +238,7 @@ object UsbGadgetController {
 
     fun unmountImage(context: Context? = null): Pair<Boolean, String> {
         if (!isRootAvailable()) {
-            return Pair(false, "Root access not available")
+            return Pair(false, "无法获取 Root 权限")
         }
 
         val configFs = getConfigFsPath()

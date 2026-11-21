@@ -580,7 +580,7 @@ class ImageChooserActivity : AppCompatActivity() {
     private fun setupNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val name = "镜像创建"
-            val descriptionText = "Progress notifications for image creation"
+            val descriptionText = "镜像创建的进度通知"
             val importance = NotificationManager.IMPORTANCE_LOW
             val channel = NotificationChannel(CHANNEL_ID, name, importance).apply {
                 description = descriptionText
@@ -694,7 +694,7 @@ class ImageChooserActivity : AppCompatActivity() {
             val sizeMb = sizeStr.toLongOrNull() ?: 1024L
 
             if (name.isEmpty()) {
-                dialogBinding.etImageName.error = "Name cannot be empty"
+                dialogBinding.etImageName.error = "名称不能为空"
                 return@setOnClickListener
             }
 
@@ -796,7 +796,7 @@ class ImageChooserActivity : AppCompatActivity() {
         binding.speedDialContainer.visibility = View.GONE
 
         val initialCount = adapter.checkedFiles.size
-        binding.toolbar.title = if (initialCount > 0) "Selected $initialCount Image(s)" else "Select Image(s)"
+        binding.toolbar.title = if (initialCount > 0) "已选择 $initialCount 个镜像" else "请选择镜像"
         binding.toolbar.setNavigationIcon(R.drawable.ic_close_vector)
         binding.toolbar.setNavigationOnClickListener {
             exitFormatSelectionMode()
@@ -828,7 +828,7 @@ class ImageChooserActivity : AppCompatActivity() {
         }
 
         adapter.onSelectionCountChanged = { count ->
-            binding.toolbar.title = if (count > 0) "Selected $count Image(s)" else "Select Image(s)"
+            binding.toolbar.title = if (count > 0) "已选择 $count 个镜像" else "请选择镜像"
         }
     }
 
