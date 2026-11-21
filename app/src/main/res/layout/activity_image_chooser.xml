@@ -79,6 +79,7 @@
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fabCreateImage"
+                style="@style/Widget.PhoneStick.Fab"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:contentDescription="创建空白镜像"
@@ -112,6 +113,7 @@
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fabImportImage"
+                style="@style/Widget.PhoneStick.Fab"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:contentDescription="导入已有镜像"
@@ -145,6 +147,7 @@
 
             <com.google.android.material.floatingactionbutton.FloatingActionButton
                 android:id="@+id/fabFormatImage"
+                style="@style/Widget.PhoneStick.Fab"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:contentDescription="格式化镜像文件"
@@ -157,6 +160,7 @@
         <!-- Main FAB -->
         <com.google.android.material.floatingactionbutton.FloatingActionButton
             android:id="@+id/fabMain"
+            style="@style/Widget.PhoneStick.Fab"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:contentDescription="添加镜像操作"

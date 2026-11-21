@@ -30,6 +30,14 @@
         <item name="cardElevation">2dp</item>
     </style>
 
+    <!-- 扁平 FAB：主按钮与 Speed Dial 子按钮都不带阴影（静止/按压/悬停三态），
+         反馈交给涟漪效果 -->
+    <style name="Widget.PhoneStick.Fab" parent="Widget.Material3.FloatingActionButton.Primary">
+        <item name="elevation">0dp</item>
+        <item name="pressedTranslationZ">0dp</item>
+        <item name="hoveredFocusedTranslationZ">0dp</item>
+    </style>
+
     <!-- Material 3 Expressive Dialog Style -->
     <style name="ThemeOverlay.PhoneStick.MaterialAlertDialog" parent="ThemeOverlay.Material3.MaterialAlertDialog">
         <item name="shapeAppearanceOverlay">@style/ShapeAppearance.PhoneStick.Dialog</item>
