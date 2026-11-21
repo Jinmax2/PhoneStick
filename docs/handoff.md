@@ -487,11 +487,14 @@ sysfs 回退候选里只有 android0，这台机器上等于没有 sysfs 兜底�
   真回收要裸调 `pstrim <image>`。
 - 新增 `tools/verify-status-logic.sh`：设备侧 P2 差分验证（clean/stale/
   mount/restore/report 子命令，逐条 adb 调用，避免 USB 重枚举杀 shell）。
-- **状态栏图标反色修复**：主题没设 `windowLightStatusBar`，浅色模式下系统
-  给白色图标压在浅色 `md_theme_surface` 上，几乎不可见（MI 6 实测）；
-  而深色模式"看起来正常"纯靠 MIUI 强制深色把状态栏一起反转，
-  在非 MIUI ROM（如 ColorOS）上不可依赖。修复：浅色模式显式声明深色图标
-  （`windowLightStatusBar=true`，导航栏同理），夜间新增 `values-night/styles.xml`
-  给深色 `md_theme_surface_dark(#17191C)` 状态栏 + 浅色图标——两种模式都
-  不再依赖系统反转。MI 6 双模式截图回归通过。
+- **状态栏修复（反色 + 同色）**：主题没设 `windowLightStatusBar`，浅色模式下
+  系统给白色图标压在浅色 `md_theme_surface` 上，几乎不可见（MI 6 实测）；
+  深色模式"看着正常"纯靠 MIUI 强制深色，且状态栏（我最初引入的 #17191C）
+  与 App 原有夜间调色板（`values-night/colors.xml`，surface #111315）不一致，
+  在工具栏下方形成色带——像素采样抓出来的。最终方案：状态栏/导航栏/工具栏
+  统一引用 `md_theme_surface`（布局给 AppBarLayout 显式背景，消除 M3
+  elevation tint 的色差），夜间补 `windowLightStatusBar=false` +
+  `forceDarkAllowed=false` 关掉 ROM 强制深色，让 App 自带的夜间调色板
+  独立渲染、任何 ROM 可预期。MI 6 双模式像素采样回归：状态栏与工具栏
+  完全同色（浅 #FAFDFD、深 #111315 贯通）。
 - README 更新版本表、pstrim 源码路径、已知限制（多分区回收早就是现状）。
