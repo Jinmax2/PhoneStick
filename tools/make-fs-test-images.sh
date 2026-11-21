@@ -36,6 +36,9 @@ cleanup() {
 trap cleanup EXIT
 
 # 建 MBR（单分区，起始 LBA 2048）+ 格式化 + 挂载填内容
+# loop 直接挂在分区偏移上（start=2048 扇区 × 512B = 1MiB），
+# 不依赖内核解析分区表——没有 udev 的容器/runner 上也就没有分区节点竞态。
+PART_START=$((2048 * 512))
 make_image() {
   local name=$1 ptype=$2 mkfs=$3
   local img="$OUT/$name.img"
@@ -44,26 +47,9 @@ make_image() {
 
   printf 'label: dos\nstart=2048, type=%s\n' "$ptype" | sfdisk -q "$img" >/dev/null
 
-  local loop
-  loop=$(losetup -fP --show "$img")
-  CREATED_LOOPS="$CREATED_LOOPS $loop"
-  local part="${loop}p1"
-  # 容器里没有 udev，内核只在 sysfs 里登记分区，设备节点要自己建。
-  # 复用刚 detach 的 loop 时，内核的分区扫描可能不触发（GitHub runner
-  # 实测偶发）——每 10 轮强制 partprobe 重扫一次兜底。
-  local i
-  for i in $(seq 1 100); do
-    [ -b "$part" ] && break
-    if [ $((i % 10)) = 0 ]; then
-      partprobe "$loop" 2>/dev/null || blockdev --rereadpt "$loop" 2>/dev/null || true
-    fi
-    devno=$(cat "/sys/class/block/$(basename "$part")/dev" 2>/dev/null || true)
-    if [ -n "${devno:-}" ]; then
-      mknod "$part" b "${devno%%:*}" "${devno##*:}" 2>/dev/null || true
-    fi
-    sleep 0.1
-  done
-  [ -b "$part" ] || { echo "分区节点 $part 没有出现" >&2; exit 1; }
+  local part
+  part=$(losetup -f --show -o "$PART_START" "$img")
+  CREATED_LOOPS="$CREATED_LOOPS $part"
 
   case "$mkfs" in
     fat32)  mkfs.vfat -F 32 -n PSTEST "$part" >/dev/null ;;
@@ -86,7 +72,7 @@ make_image() {
   fi
   sync
   umount "$mnt"
-  losetup -d "$loop"
+  losetup -d "$part"
   echo "built $img ($mkfs)"
 }
 
@@ -102,20 +88,11 @@ truncate -s "${SIZE_MB}M" "$GPT_IMG"
 printf 'label: gpt\nstart=2048\n' | sfdisk -q "$GPT_IMG" >/dev/null
 # Microsoft basic data
 sfdisk --part-type "$GPT_IMG" 1 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 >/dev/null 2>&1 || true
-LOOP=$(losetup -fP --show "$GPT_IMG")
+LOOP=$(losetup -f --show -o "$PART_START" "$GPT_IMG")
 CREATED_LOOPS="$CREATED_LOOPS $LOOP"
-for i in $(seq 1 100); do
-  [ -b "${LOOP}p1" ] && break
-  if [ $((i % 10)) = 0 ]; then
-    partprobe "$LOOP" 2>/dev/null || blockdev --rereadpt "$LOOP" 2>/dev/null || true
-  fi
-  devno=$(cat "/sys/class/block/$(basename "${LOOP}p1")/dev" 2>/dev/null || true)
-  [ -n "${devno:-}" ] && mknod "${LOOP}p1" b "${devno%%:*}" "${devno##*:}" 2>/dev/null || true
-  sleep 0.1
-done
-mkfs.vfat -F 32 -n PSGPT "${LOOP}p1" >/dev/null
+mkfs.vfat -F 32 -n PSGPT "$LOOP" >/dev/null
 mkdir -p "$OUT/.mnt3"
-mount "${LOOP}p1" "$OUT/.mnt3"
+mount "$LOOP" "$OUT/.mnt3"
 echo "$GREETING gpt" > "$OUT/.mnt3/hello.txt"
 sync
 umount "$OUT/.mnt3"

@@ -48,9 +48,8 @@ DENSE="$OUT/dense-fat32.img"
 rm -f "$DENSE" "$DENSE.big.md5"
 dd if=/dev/zero of="$DENSE" bs=1M count=$SIZE_MB status=none
 printf 'label: dos\nstart=2048, type=0c\n' | sfdisk -q "$DENSE" >/dev/null
-LOOP=$(losetup -fP --show "$DENSE")
-CREATED_LOOPS="$CREATED_LOOPS $LOOP"
-PART="${LOOP}p1"
+PART=$(losetup -f --show -o 1048576 "$DENSE")
+CREATED_LOOPS="$CREATED_LOOPS $PART"
 mkfs.vfat -F 32 -n PSDENSE "$PART" >/dev/null
 mkdir -p "$OUT/.mntd"
 mount "$PART" "$OUT/.mntd"
@@ -81,19 +80,15 @@ check_image() {
   "$PSTRIM" "$img" >/dev/null
   echo "  $label pstrim ok"
 
-  # 挂载回读
-  local loop part
+  # 挂载回读（与 make-fs-test-images.sh 一致：MBR/GPT 直接挂 1MiB 分区
+  # 偏移，不依赖分区节点扫描，避开无 udev 环境的竞态）
+  local part
   if [ "$layout" = superfloppy ]; then
-    loop=$(losetup -f --show "$img")
+    part=$(losetup -f --show "$img")
   else
-    loop=$(losetup -fP --show "$img")
+    part=$(losetup -f --show -o 1048576 "$img")
   fi
-  CREATED_LOOPS="$CREATED_LOOPS $loop"
-  if [ "$layout" = superfloppy ]; then
-    part="$loop"
-  else
-    part="${loop}p1"
-  fi
+  CREATED_LOOPS="$CREATED_LOOPS $part"
   local mnt="$OUT/.mntck"
   mkdir -p "$mnt"
   mount "$part" "$mnt"
@@ -126,9 +121,9 @@ check_image() {
     ext4)  e2fsck -fn "$part" >/dev/null || { echo "  $label FAIL: e2fsck"; ok=0; } ;;
   esac
 
-  losetup -d "$loop" || true
+  losetup -d "$part" || true
   # 从清理名单里摘掉这个已释放的 loop（简单起见靠 grep 去重）
-  CREATED_LOOPS=$(echo " $CREATED_LOOPS " | sed "s| $loop | |" | sed 's/^ //;s/ $//')
+  CREATED_LOOPS=$(echo " $CREATED_LOOPS " | sed "s| $part | |" | sed 's/^ //;s/ $//')
 
   if [ "$ok" = 1 ]; then
     echo "  $label PASS"
