@@ -1,0 +1,59 @@
+# PhoneStick CI：JVM 单测（真实测试镜像）+ pstrim 主机侧回归 + 构建 APK。
+#
+# 不用 Docker：ubuntu-latest 自带 Android SDK，losetup/mount 用 sudo 跑即可
+# （docs/browse.md 的容器流程是给本地用的，CI 上直跑更快）。
+# pstrim 只编 aarch64 是因为 App 面向真机；本机回归用 host gcc 编译验证逻辑。
+name: CI
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: 安装文件系统工具（测试镜像 / pstrim 回归用）
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends dosfstools exfatprogs ntfs-3g
+
+      - name: 生成测试镜像（losetup 需要 root）
+        run: sudo bash tools/make-fs-test-images.sh "$GITHUB_WORKSPACE/.testdata"
+
+      - name: JVM 单元测试（用户态解析器 / stat 行解析）
+        run: >
+          ./gradlew :app:testReleaseUnitTest --console=plain
+          -Dps.test.image.fat32="$PWD/.testdata/fat32.img"
+          -Dps.test.image.exfat="$PWD/.testdata/exfat.img"
+          -Dps.test.image.ntfs="$PWD/.testdata/ntfs.img"
+          -Dps.test.image.ext4="$PWD/.testdata/ext4.img"
+          -Dps.test.image.ntfsnopt="$PWD/.testdata/ntfs-nopt.img"
+          -Dps.test.image.gpt="$PWD/.testdata/gpt-fat32.img"
+
+      - name: pstrim 主机侧回归（打洞 → md5 + fsck）
+        run: sudo bash tools/regression-pstrim.sh /tmp/pstrim-regress
+
+      - name: 构建调试 APK
+        run: ./gradlew :app:assembleDebug --console=plain
+
+      - name: 上传测试镜像（失败时排查用）
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-images
+          path: .testdata/
+          if-no-files-found: ignore
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: PhoneStick-debug-apk
+          path: app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error

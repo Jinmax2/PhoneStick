@@ -14,7 +14,7 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 
 > **本仓库是 [`mingww64/PhoneStick`](https://github.com/mingww64/PhoneStick) 的个人分支（fork）。**
 > 上游基线为 `v2.3.1-beta`（2.3.0 系列），本分支在其之上修复了镜像位置、分区表、稀疏占用等问题，
-> 并做了中文化、空间回收等增强，当前版本 **2.4.1**（versionCode 23）。
+> 并做了中文化、空间回收等增强，当前版本 **2.4.3**（versionCode 25）。
 >
 > 主要增强：
 > - **稀疏镜像**：`truncate` 秒建，物理占用随写入增长（4GB 约 2 秒，8GB 实测 126MB）
@@ -24,11 +24,12 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 > - **镜像内文件浏览**（2.4.2）：直接查看 / 添加 / 删除 / 读出镜像里的文件，
 >   内核挂载读写；NTFS 在无写驱动的老内核上落到内置只读解析器
 > - 修复：MediaStore 记录滞后导致文件管理器显示旧大小；裸盘镜像不被识别为稀疏
-> - 安装包在 [Releases](https://github.com/kanhuiji100/PhoneStick/releases) 下载（仓库内不存 APK）
+> - 安装包在 [Releases](https://github.com/kanhuiji100/PhoneStick/releases) 下载（仓库内不存 APK；**不支持 F-Droid**，元数据已移除）
 > - 与原版签名不同，覆盖安装前需先 `adb uninstall mingww64.phonestick`
->
+> - 签名密钥随仓库公开（可复现构建），因此请只从 Releases 下载安装包
 
----|---|
+| 版本 | 主要改动 |
+|---|---|
 | 2.3.1 | 镜像移到 `/data/media/0`（SELinux 可写）；MBR 分区数动态计算；格式化失败上报；定位 Windows 驱动抢占 MS 接口 |
 | 2.3.2 | **稀疏镜像**（`truncate`）：8GB 镜像创建约 2 秒、占用 126MB，解决 >2GB OOM；列表显示实际占用 |
 | 2.3.3 | **中文界面**；挂载默认读写；新增**释放未使用空间**（FAT32，`fallocate(PUNCH_HOLE)` 打洞） |
@@ -39,6 +40,7 @@ PhoneStick turns your rooted Android device into a USB Mass Storage drive or CD-
 | 2.4.0 | 多分区镜像逐个回收；回收入口对所有镜像开放 |
 | 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描；新增 `--stats` / `--map` 诊断 |
 | 2.4.2 | **镜像内文件浏览**：查看 / 添加 / 删除 / 读出 / 新建 / 重命名；内核 loop 挂载读写 + 内置 NTFS 只读解析器 |
+| 2.4.3 | 修复挂载状态误报（`lun.0/file` 有残留也报已挂载）；删除从未成功过的自建 ConfigFS gadget 兜底路径；修复浅色模式下状态栏图标反色不可见 |
 
 细节见 [`docs/handoff.md`](docs/handoff.md)（逐版本改动与实测数据）、
 [`docs/design.md`](docs/design.md)（稀疏镜像与打洞回收的方案论证）、
@@ -95,11 +97,12 @@ chmod +x gradlew
 仓库中已提供，一般不用重新编译。需要改源码时：
 
 ```bash
-aarch64-linux-gnu-gcc -static -O2 -o pstrim tools/pstrim.c
+aarch64-linux-gnu-gcc -static -O2 -o pstrim native/pstrim.c
 cp pstrim app/src/main/assets/pstrim
 ```
 
-签名使用仓库内的 `app/release.jks`（与上游一致），密钥口令见 `app/build.gradle`。
+签名使用仓库内的 `app/release.jks`，密钥口令见 `app/build.gradle`。密钥是随仓库公开的
+（换取任何人都能复现构建），请只从 Releases 下载安装包。
 
 ## 安装
 
@@ -121,11 +124,13 @@ adb install PhoneStick-2.3.7-cn.apk      # 从 Releases 下载
 
 | 路径 | 内容 |
 |---|---|
-| [`docs/handoff.md`](docs/handoff.md) | 版本演进（2.3.1 → 2.3.7）、每轮改动、遗留问题与待办 |
+| [`docs/handoff.md`](docs/handoff.md) | 版本演进（2.3.1 → 2.4.x）、每轮改动、遗留问题与待办 |
 | [`docs/design.md`](docs/design.md) | 稀疏镜像方案研究、空间回收实现、几轮 bug 的根因与验证数据 |
+| [`docs/browse.md`](docs/browse.md) | 镜像内文件浏览：两条数据通路、支持矩阵、离线/真机验证 |
 | [`docs/troubleshooting.md`](docs/troubleshooting.md) | 早期根因排查（SELinux 写权限、MBR 截断、Windows 驱动抢占接口） |
 | [`docs/windows.md`](docs/windows.md) | Windows 侧环境搭建、构建、验证与故障对照表 |
-| `tools/pstrim.c` | 多文件系统打洞工具源码（随包二进制的来源） |
+| `native/pstrim.c` | 多文件系统打洞工具源码（随包二进制 `assets/pstrim` 的来源） |
+| `tools/make-fs-test-images.sh` | 生成 JVM 单测与 pstrim 回归用的测试镜像（FAT32/exFAT/NTFS/ext4 × MBR/GPT/超级软盘） |
 | `tools/diagnose-windows-usb.ps1` | Windows 只读诊断：adb → LUN → 配置链接 → MS 接口绑定 → 盘符 |
 | `tools/fix-windows-usb-driver.ps1` | 备份并移除抢占 MS 接口的 OEM ADB 驱动包，`-Restore` 还原 |
 | `tools/device-doctor.sh` | 手机侧一键体检 |
@@ -134,8 +139,10 @@ adb install PhoneStick-2.3.7-cn.apk      # 从 Releases 下载
 
 ## 已知限制
 
-- `pstrim` 只编译了 **arm64-v8a**，其他架构会提示不支持。
-- 空间回收只处理**第一个分区**；ext4 的 `BLOCK_UNINIT` 组保守跳过（可能少回收）。
+- `pstrim` 只编译了 **arm64-v8a**（本项目只面向真机手机，不计划支持其他架构）。
+- 回收与浏览都只认 **MBR 4 主分区 / GPT 条目**，扩展分区 / 逻辑分区不展开；
+  浏览多分区镜像时只打开**容量最大**的可识别分区。
+- NTFS 写入依赖内核驱动（`ntfs3` / `ufsd`）；老内核上内置解析器只读。
 - 镜像在手机内部复制（`cp` / `dd`）会**丢失稀疏性**——toybox 没有 `conv=sparse`；
   需要保稀疏请在 PC 上操作（`cp --sparse=always` / `rsync -S` / `qemu-img convert -O raw`）。
 - `/sdcard` 是 FUSE 视图，MediaStore 记录可能滞后；App 已做同步与自愈，

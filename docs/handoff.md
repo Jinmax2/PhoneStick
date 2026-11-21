@@ -1,26 +1,32 @@
-# PhoneStick 开发交接（更新至 2.4.2）
+# PhoneStick 开发交接（更新至 2.4.3）
 
 > 设备：Redmi K20 Pro (raphael)，Android 17 / SDK 37，kernel 4.14.357，Magisk 31.1
-> 工程：`PhoneStick/` 2.4.2（versionCode 24）
-> 交付：`交付/PhoneStick-2.4.2-cn.apk` + `交付/源码改动-2.4.2.patch`
-> 配套：`README.md`（总览）、`动态镜像研究.md`（方案与 bug 复盘）、
-> `排查报告.md`（早期根因）、`Windows迁移调试指南.md`（Windows 环境）、
-> `docs/browse.md`（镜像内文件浏览的方案与验证）
+> 工程：`PhoneStick/` 2.4.3（versionCode 25）
+> 交付：APK 只发 GitHub Releases（仓库内不存 APK，也没有本地 `交付/` 目录）
+> 配套：`README.md`（总览）、`docs/browse.md`（镜像内文件浏览的方案与验证）。
+> 注意：早年的 `动态镜像研究.md` / `排查报告.md` / `Windows迁移调试指南.md` /
+> `进度与交接.md` 是当时交付包里的**外部文件，没有进仓库**，本文引用它们的地方
+> 都可以在本文件与 `docs/troubleshooting.md`、`docs/windows.md` 里找到结论。
 
 ---
 
-## 零、当前状态（2.4.2）
+## 零、当前状态（2.4.3）
 
 | 项目 | 状态 |
 |---|---|
 | 挂载 / 卸载 U 盘 | ✅ 真机验证 |
+| 挂载状态检测 | ✅ 2.4.3 起校验「function 已链进 configuration + UDC 已绑定」，`lun.0/file` 残留不再误报已挂载（原 P2） |
 | 稀疏镜像创建（含裸盘） | ✅ 4GB 约 2 秒，8GB 实测 126MB 占用 |
 | 容量 / 实际占用显示 | ✅ `8.00 GB · 已用 264 MB` / `2.00 GB · 未写入` |
 | 释放未使用空间 | ✅ FAT32 / exFAT / NTFS / ext4，MBR / GPT / 无分区表，**多分区逐个处理** |
 | 镜像内文件浏览 | ✅ 真机验证（Xiaomi 15 / Android 17 / kernel 6.12）：FAT32 / exFAT / ext4 挂载读写、GPT 与超级软盘布局、NTFS 无驱动时内置解析器只读、U 盘占用时卸载后可浏览且退出自动恢复；PC 侧 16 个单测 |
 | 中文界面 | ✅ 布局 + 对话框 + 菜单 + 通知 |
+| 状态栏对比度 | ✅ 浅色模式深色图标、夜间模式深色底浅色图标，显式声明不再依赖系统强制反转（MI 6 双模式回归） |
 | 默认读写挂载 | ✅ `switchReadOnly` 默认关闭 |
-| 遗留 | 仅 arm64；扩展/逻辑分区不展开；ext4 `BLOCK_UNINIT` 组跳过；浏览功能等真机回归 |
+| 自建 ConfigFS gadget 兜底 | ❌ 已删除（原 Strategy 2，实测从未成功过） |
+| F-Droid | ❌ 已放弃（元数据停更指上游，2.4.3 起删除，只从 GitHub Releases 发 APK） |
+| CI | ✅ GitHub Actions：JVM 单测（含测试镜像）+ assembleDebug |
+| 遗留 | 仅 arm64（有意为之，项目只面向手机）；扩展/逻辑分区不展开；浏览多分区只开最大分区 |
 
 ### 版本历史
 
@@ -36,6 +42,7 @@
 | 2.4.0 | 多分区镜像逐个回收（GPT 全条目 / MBR 4 主分区）+ 尾部零块回收；回收入口对所有镜像开放 |
 | 2.4.1 | ext4 `BLOCK_UNINIT` 组参与回收 + 零块扫描（inode 表/保留 GDT 可压缩）；新增 --stats/--map 诊断 |
 | 2.4.2 | **镜像内文件浏览**：查看/添加/删除/读出/新建/重命名；内核 loop 挂载读写 + 无驱动时内置 NTFS 只读解析器；与 USB gadget 互斥处理（退出后自动恢复挂载） |
+| 2.4.3 | 挂载状态误报修复（P2）；删除 Strategy 2 兜底与死代码；F-Droid 元数据移除；GitHub Actions CI；pstrim 主机侧回归脚本；删 `tools/pstrim.c` 旧副本；浅色模式状态栏图标反色修复 |
 
 > 以下「一 ～ 十二」按时间顺序保留了每一轮的排查过程与实测数据，
 > 结论仍然有效，但**当前状态以本节为准**。
@@ -117,14 +124,14 @@
 
 ### 待办（建议顺序）
 
-1. **P2**（最值得修）：`getMountStatus()` 只检查 `lun.0/file` 非空就报告已挂载。
-   建议增加：`configs/b.1/` 里是否存在 `mass_storage` 链接 + `getprop sys.usb.config` 是否包含 `mass_storage`。
-2. **Strategy 2 决策**：要么按 Android 17 的 SELinux 限制重新设计（可能得改用
-   `setprop` 路径或放弃自建 gadget），要么直接删掉，避免"兜底比主路径更糟"。
+1. ~~**P2**：`getMountStatus()` 只检查 `lun.0/file` 非空就报告已挂载~~ → **2.4.3 已修**：
+   校验「function 链进 configuration（链接名或解析目标）+ gadget 绑定了 UDC」，
+   老sysfs 路径看 `android0/enable`。`sys.usb.state` 依旧不参与判定（发现 D）。
+2. ~~**Strategy 2 决策**~~ → **2.4.3 已删**：实测从未成功过（发现 A），兜底比主路径更糟。
+   `unmountImage` 保留对老版本 swy 残留目录的清理。
 3. **Windows 提示**：App 无法判断主机 OS，但可以在挂载成功后提示
    "如果电脑上没有盘，运行 `tools\diagnose-windows-usb.ps1`"。
-4. P3 / P4 / P5 / P6 按原计划在 Linux 侧继续。
-5. 手机 `/data/local/tmp` 还有上一轮遗留的调试文件（`probe*.log`、`runfix.sh`、
+4. 手机 `/data/local/tmp` 还有上一轮遗留的调试文件（`probe*.log`、`runfix.sh`、
    `_mbr.bin`、`pscheck/` 等）。`tools/cleanup-device.sh` 已扩充覆盖这些名字，
    下次连上手机跑一次即可：
 
@@ -391,3 +398,100 @@ md5 一致；真机 ext4 镜像 382.57MB → 82.50MB，e2fsck 干净；
 主机回归 ext4 正常/格式化残留、FAT32 全部通过（md5 + fsck + 写入测试）。
 
 产物：`交付/PhoneStick-2.4.1-cn.apk`（vc23）、`交付/源码改动-2.4.1.patch`。
+
+---
+
+## 十五、2.4.3：状态误报修复 + 清理（2026-11-22）
+
+### 1. 挂载状态误报（原 P2）
+
+`getMountStatus()` 原来只要 `lun.0/file` 非空就报已挂载。HAL 重新配置 USB 时
+（比如用户插拔数据线后只恢复 adb），会摘掉 function 的 configuration 链接，
+但 `lun.0/file` 可能残留 → App 显示"已挂载"、主机却没有盘。
+
+新判定（`UsbGadgetController`）：
+
+- configfs 路径：`<gadget>/UDC` 非空 **且** 该 `mass_storage.N` 已链进某个
+  configuration。链接认两遍——先按同名链接（标准 ConfigFS 用法），再按
+  `readlink -f` 解析目标兜底（MIUI 等 HAL 起的链接名叫 `function2` 之类，
+  名字对不上）。
+- 老 sysfs（android_usb）路径：看 `android0/enable == 1`。
+- `sys.usb.state` 依旧不参与（发现 D：某些机器恒为空）。
+
+`mountImage()` 成功路径也复用同一判定（`pollGadgetActive`，最多等 5s）：
+LUN 拿到文件但 gadget 没生效时明确报失败，而不是让 UI 与主机状态打架。
+
+**真机差分验证（MI 6 / sagit，Android 14，kernel 4.4，configfs `/config`）**
+用 `tools/verify-status-logic.sh` 构造"file 残留 + 配置未链接"现场：
+
+| 状态 | 旧逻辑 | 新逻辑 |
+|---|---|---|
+| A 干净 | UNMOUNTED | UNMOUNTED |
+| B `lun.0/file` 有镜像路径、configs/b.1 只有 `f1 -> ffs.adb`、UDC 绑定 | **MOUNTED（误报）** | **UNMOUNTED（正确）** |
+
+C 状态（真实挂载）在 MI 6 上无法构造：这台机器的 HAL 同样忽略
+`sys.usb.config` 里的 mass_storage（`sys.usb.state` 停在 `adb`，配置不出现
+mass_storage 链接，与发现 B 的 K20 Pro 一致）——该分支由 Xiaomi 15 等
+挂载可用的设备覆盖。
+
+### 2. 删除 Strategy 2（自建 swy ConfigFS gadget）
+
+真机证据现在有**两台设备、两个系统版本**：
+
+- Xiaomi 15 / Android 17（发现 A）：`ln -s functions/mass_storage.0 configs/c.1/...` EPERM；
+- MI 6 / Android 14（本轮补测）：同样 `ln: ... Operation not permitted`，且
+  configfs 里自建 gadget 目录后连清理都要逐级 rmdir（`rm -rf` 无效）。
+
+保留它只会在挂载失败时多绕一条死路、误导排查。`unmountImage` 保留对老版本
+swy 残留目录的清理；顺带删了无调用的 `rebindUdc`。
+
+另记：MI 6 的 `/sys/class/android_usb/` 下有 `android1 / android2`（不是
+android0）——内核带着老 composite 框架，但 HAL 用的是 configfs。App 的
+sysfs 回退候选里只有 android0，这台机器上等于没有 sysfs 兜底；未做深挖，
+留作以后想给"HAL 忽略 mass_storage"机型加通路时的线索。
+
+### 2½. 真机全链路验证（一加 15 / PLK110，Android 17，kernel 6.12，KernelSU LKM）
+
+挂载可用的设备类，把 C 状态（真实挂载）补齐：
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| setprop 挂载（复刻 App 策略 1） | ✅ | `sys.usb.state=mass_storage,adb`，HAL 起链接 `f2 -> mass_storage.0` |
+| **新状态逻辑在真实挂载下判定** | ✅ | 旧/新逻辑都报 MOUNTED——`f2` 这种"链接名≠函数名"的命名正是 `readlink -f` 兜底的靶子，命中 |
+| 主机出盘 | ✅ | `sda 48M / sda1 PSTEST vfat`，挂载回读 `hello.txt` 内容一致 |
+| 标志残留 | 注意 | LUN 的 `cdrom/ro` 会**跨会话残留**（上一次 Ventoy 以 CD-ROM 挂过，主机先认成 sr0）。App 的 mountImage 每次都重写 ro/cdrom，所以正常使用不受影响；shell 手测时要自己清 |
+| 卸载 | ✅ | file 清空、HAL 摘掉 f2、主机盘消失（/dev/sda 变 0B 空节点属正常） |
+| **App 全流程**（选镜像→挂载→卸载） | ✅ | UI"已挂载"↔"未挂载"与主机状态全程一致 |
+| **Windows 主机识别**（用户实测） | ✅ | `22D9:2767` + MS@MI_01 在用户 Windows 上直接出盘、可打开——该机器没装抢占 MS 接口的一加/Oplus OEM 驱动，`usbstor.inf` 正常绑定；历史上 OPLUS `oem213.inf` 抢 MI_01 的事故没有复现条件 |
+| pstrim 现场残留 | 观察 | g1 之外还有一个 `ps` gadget（上游 com.phonestick 自建，LUN 残留 `/0/DataBackup/Ventoy.img`）；新状态逻辑的 glob 扫所有 gadget，UDC 未绑的会被正确跳过 |
+
+**KernelSU 授权的两个坑**（MI 6 是 Magisk，没这些问题）：
+
+1. KSU 对未授权 uid 内核级隐藏 `su`，App 连请求都发不出去，管理器列表里也
+   搜不到——必须先在管理器里出现授权弹窗/手动添加。装机后不弹框的话，
+   在管理器"超级用户"页确认。
+2. **授权后必须重启 App**（force-stop 再开）。libsu 在进程内缓存 shell，
+   授权前创建的非 root shell 会一直被复用，表现为 Root Guard 已过、
+   但镜像列表为空、状态判定全部失真。
+
+### 3. 仓库维护
+
+- F-Droid：`metadata/` 删除（元数据停在 2.3.0 且指向上游，早已名存实亡），
+  README 明确只从 Releases 安装。
+- 删 `tools/pstrim.c`（2.3.7 旧副本，缺 `--stats/--map` 与 ext4 修正），
+  唯一权威源码在 `native/pstrim.c`。
+- 新增 `.github/workflows/ci.yml`：JVM 单测（用 `tools/make-fs-test-images.sh`
+  生成镜像）+ pstrim 回归 + `assembleDebug`。
+- 新增 `tools/regression-pstrim.sh`：pstrim 的主机侧回归，本机实测 7/7 通过，
+  预分配镜像 49152K → 3140K，md5 + fsck 全绿。注意 `--stats` 自带 dry-run，
+  真回收要裸调 `pstrim <image>`。
+- 新增 `tools/verify-status-logic.sh`：设备侧 P2 差分验证（clean/stale/
+  mount/restore/report 子命令，逐条 adb 调用，避免 USB 重枚举杀 shell）。
+- **状态栏图标反色修复**：主题没设 `windowLightStatusBar`，浅色模式下系统
+  给白色图标压在浅色 `md_theme_surface` 上，几乎不可见（MI 6 实测）；
+  而深色模式"看起来正常"纯靠 MIUI 强制深色把状态栏一起反转，
+  在非 MIUI ROM（如 ColorOS）上不可依赖。修复：浅色模式显式声明深色图标
+  （`windowLightStatusBar=true`，导航栏同理），夜间新增 `values-night/styles.xml`
+  给深色 `md_theme_surface_dark(#17191C)` 状态栏 + 浅色图标——两种模式都
+  不再依赖系统反转。MI 6 双模式截图回归通过。
+- README 更新版本表、pstrim 源码路径、已知限制（多分区回收早就是现状）。
