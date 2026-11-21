@@ -75,10 +75,18 @@ check_image() {
   label="[$(basename "$img")/$fs/$layout]"
 
   # 注意：--stats 是诊断模式，自带 dry-run（不会真的打洞）。
-  # 先 dry 预览一遍，再真刀真枪回收。
-  "$PSTRIM" "$img" --stats >/dev/null
-  "$PSTRIM" "$img" >/dev/null
-  echo "  $label pstrim ok"
+  # 先 dry 预览一遍，再真刀真枪回收。失败时输出 pstrim 的
+  # STATUS 行（诊断信息），不让 set -e 静默吞掉。
+  local ok=1
+  "$PSTRIM" "$img" --stats > /tmp/ps-stat.out 2>&1 || {
+    echo "  $label FAIL: pstrim --stats $(tail -1 /tmp/ps-stat.out)"
+    ok=0
+  }
+  "$PSTRIM" "$img" > /tmp/ps-real.out 2>&1 || {
+    echo "  $label FAIL: pstrim 实回收 $(tail -1 /tmp/ps-real.out)"
+    ok=0
+  }
+  [ "$ok" = 1 ] && echo "  $label pstrim ok"
 
   # 挂载回读（与 make-fs-test-images.sh 一致：MBR/GPT 直接挂 1MiB 分区
   # 偏移，不依赖分区节点扫描，避开无 udev 环境的竞态）
@@ -94,7 +102,6 @@ check_image() {
   mount "$part" "$mnt"
   MOUNTED="$MOUNTED $mnt"
 
-  local ok=1
   [ "$(cat "$mnt/hello.txt")" = "$hello" ] || { echo "  $label FAIL: hello.txt 内容不符"; ok=0; }
   if [ "$have_big" = yes ]; then
     local want got
@@ -141,7 +148,10 @@ check_image "$OUT/gpt-fat32.img"  fat32 "$GREETING gpt"        gpt         no  n
 check_image "$OUT/ntfs-nopt.img"  ntfs  "$GREETING nopt"       superfloppy no  no
 
 # 预分配镜像：必须显著变小 + 全套数据校验（真实回收，不带 --stats 的 dry 语义）
-"$PSTRIM" "$DENSE" >/dev/null
+"$PSTRIM" "$DENSE" > /tmp/ps-dense.out 2>&1 || {
+  echo "dense FAIL: pstrim 实回收 $(tail -1 /tmp/ps-dense.out)"
+  fail=$((fail+1))
+}
 AFTER=$(du -sk "$DENSE" | awk '{print $1}')
 echo "dense image after trim: ${AFTER}K (was ${BEFORE}K)"
 if [ "$AFTER" -lt $((BEFORE / 2)) ]; then

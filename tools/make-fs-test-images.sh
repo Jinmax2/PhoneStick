@@ -47,8 +47,15 @@ make_image() {
 
   printf 'label: dos\nstart=2048, type=%s\n' "$ptype" | sfdisk -q "$img" >/dev/null
 
+  # 从 sfdisk dump 解析分区实际大小（本地化无关），给 mkfs 一个与
+  # 分区表严格一致的设备——否则 FS 几何会超出 GPT 条目声明的大小
+  # （GPT 尾部留了备份 GPT），pstrim/分区表校验会拒绝
+  local part_sectors
+  part_sectors=$(sfdisk -d "$img" | grep -oE 'size= *[0-9]+' | grep -oE '[0-9]+' | head -1)
+  [ -n "$part_sectors" ] || { echo "无法解析分区大小" >&2; exit 1; }
+
   local part
-  part=$(losetup -f --show -o "$PART_START" "$img")
+  part=$(losetup -f --show -o "$PART_START" --sizelimit $((part_sectors * 512)) "$img")
   CREATED_LOOPS="$CREATED_LOOPS $part"
 
   case "$mkfs" in
@@ -88,7 +95,8 @@ truncate -s "${SIZE_MB}M" "$GPT_IMG"
 printf 'label: gpt\nstart=2048\n' | sfdisk -q "$GPT_IMG" >/dev/null
 # Microsoft basic data
 sfdisk --part-type "$GPT_IMG" 1 EBD0A0A2-B9E5-4433-87C0-68B6B72699C7 >/dev/null 2>&1 || true
-LOOP=$(losetup -f --show -o "$PART_START" "$GPT_IMG")
+gpt_sectors=$(sfdisk -d "$GPT_IMG" | grep -oE 'size= *[0-9]+' | grep -oE '[0-9]+' | head -1)
+LOOP=$(losetup -f --show -o "$PART_START" --sizelimit $((gpt_sectors * 512)) "$GPT_IMG")
 CREATED_LOOPS="$CREATED_LOOPS $LOOP"
 mkfs.vfat -F 32 -n PSGPT "$LOOP" >/dev/null
 mkdir -p "$OUT/.mnt3"
