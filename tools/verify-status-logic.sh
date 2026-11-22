@@ -8,6 +8,9 @@
 #   （C 真实挂载无法在此设备构造：HAL 忽略 sys.usb.config 里的 mass_storage，
 #     与 K20 Pro 上发现 B 一致；C 分支的逻辑由 Xiaomi 15 等可用设备覆盖）
 #
+# 2.4.5 起新逻辑与 app 内 UsbGadgetController.gadgetActiveShellFn
+# （ps_gadget_active）同源——改判定必须两边同步改。
+#
 # 用法（每条独立 adb 调用，中间 adb 可能闪断几秒，属正常）：
 #   adb push tools/verify-status-logic.sh /data/local/tmp/
 #   adb shell su -c "sh /data/local/tmp/ps-verify.sh clean"
@@ -17,25 +20,35 @@
 CG=/config/usb_gadget/g1
 LUN_FILE=$(ls $CG/functions/mass_storage.*/lun.0/file 2>/dev/null | head -n1)
 
+# 与 app 内 gadgetActiveShellFn 保持同源（UDC 绑定 + configuration 链接 + readlink 兜底）
+ps_gadget_active() {
+  LUN="$1"
+  ACTIVE=0
+  case "$LUN" in
+    */functions/*)
+      GADGET="${LUN%/functions/*}"
+      FUNC="${LUN#*/functions/}"; FUNC="${FUNC%%/*}"
+      if [ -n "$(cat "$GADGET/UDC" 2>/dev/null)" ]; then
+        for cfg in "$GADGET"/configs/*/; do
+          if [ -e "${cfg}$FUNC" ]; then ACTIVE=1; break; fi
+          for link in "${cfg}"*; do
+            case "$(readlink -f "$link" 2>/dev/null)" in
+              */functions/$FUNC) ACTIVE=1; break 2 ;;
+            esac
+          done
+        done
+      fi
+      ;;
+  esac
+  echo "$ACTIVE"
+}
+
 new_logic() {
   for lun in $CG/functions/mass_storage.*/lun.*; do
     [ -f "$lun/file" ] || continue
     CONTENT=$(cat "$lun/file" 2>/dev/null)
     [ -n "$CONTENT" ] || continue
-    GADGET="${lun%/functions/*}"
-    FUNC="${lun#*/functions/}"; FUNC="${FUNC%%/*}"
-    ACTIVE=0
-    if [ -n "$(cat "$GADGET/UDC" 2>/dev/null)" ]; then
-      for cfg in "$GADGET"/configs/*/; do
-        if [ -e "${cfg}$FUNC" ]; then ACTIVE=1; break 2; fi
-        for link in "${cfg}"*; do
-          case "$(readlink -f "$link" 2>/dev/null)" in
-            */functions/$FUNC) ACTIVE=1; break 2 ;;
-          esac
-        done
-      done
-    fi
-    if [ "$ACTIVE" = "1" ]; then
+    if [ "$(ps_gadget_active "$lun")" = "1" ]; then
       echo "MOUNTED file=$CONTENT"
       return
     fi

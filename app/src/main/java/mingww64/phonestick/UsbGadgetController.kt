@@ -8,6 +8,12 @@ import com.topjohnwu.superuser.Shell
 object UsbGadgetController {
     private const val TAG = "UsbGadgetController"
 
+    // configfs 挂载点每次开机稳定（init 挂载后不变）。getMountStatus 是状态
+    // 轮询路径，每次探测要 2-3 个 root shell 往返，进程内缓存掉。
+    // 只缓存非空结果：shell 未就绪时探测失败可以下次重试。
+    @Volatile
+    private var cachedConfigFs: String? = null
+
     data class MountStatus(
         val isMounted: Boolean = false,
         val currentFile: String = "",
@@ -47,16 +53,19 @@ object UsbGadgetController {
      * to well-known paths used across different Android vendors (Qualcomm, MediaTek, etc.).
      */
     private fun getConfigFsPath(): String {
+        cachedConfigFs?.let { return it }
         val mountRes = Shell.cmd("mount -t configfs 2>/dev/null | head -n1 | awk '{print \$3}'").exec()
         val mountPath = mountRes.out.firstOrNull()?.trim() ?: ""
         if (mountPath.isNotEmpty()) {
             Log.d(TAG, "ConfigFS from mount: $mountPath")
+            cachedConfigFs = mountPath
             return mountPath
         }
         for (path in listOf("/sys/kernel/config", "/config")) {
             val res = Shell.cmd("[ -d $path/usb_gadget ] && echo OK").exec()
             if (res.out.contains("OK")) {
                 Log.d(TAG, "ConfigFS found at: $path")
+                cachedConfigFs = path
                 return path
             }
         }
@@ -105,6 +114,8 @@ object UsbGadgetController {
         val roFlag = if (readOnly) "y" else "n"
         val cdromFlag = if (cdrom) "y" else "n"
         val configFs = getConfigFsPath()
+        // 探测失败时按最常见的 /config 兜底（与 tryConfigfsDirectMount 同规则）
+        val cfgRoot = configFs.ifEmpty { "/config" }
         Log.d(TAG, "Mount: configFs=$configFs")
 
         // 尽早建好自建 gadget 树（ps0）并链接 function——必须在任何
@@ -122,8 +133,7 @@ object UsbGadgetController {
         // This is how DriveDroid works and is the correct approach for devices like Xiaomi 15
         // where mass_storage is not pre-present in the gadget tree.
         // If init doesn't create a LUN within 5s, the kernel doesn't support this mode.
-        //（曾经还有一个自建 ConfigFS gadget 的"Strategy 2"兜底，实测在 Android 17 上
-        // 被 SELinux 拦死、从未成功过，2.4.3 起删除——详见 docs/handoff.md）
+        //（历史上的"自建 gadget 兜底"已于 2.4.3 删除，现由下方 configfs-direct 回退承担——docs/handoff.md）
         val curConfig = Shell.cmd("getprop sys.usb.config").exec().out.firstOrNull()?.trim() ?: ""
         if (!curConfig.contains("mass_storage")) {
             val prefs = context.getSharedPreferences("phonestick", Context.MODE_PRIVATE)
@@ -138,14 +148,12 @@ object UsbGadgetController {
         }
 
         // Poll up to 5s for a mass_storage LUN to appear (created by init)
-        val lunCandidates = buildList {
-            if (configFs.isNotEmpty()) {
-                add("$configFs/usb_gadget/g1/functions/mass_storage.0/lun.0")
-                add("$configFs/usb_gadget/g1/functions/mass_storage.0/lun")
-            }
-            add("/sys/class/android_usb/android0/f_mass_storage/lun0")
-            add("/sys/class/android_usb/android0/f_mass_storage/lun")
-        }
+        // minSdk 24（Android 7.0+）起 configfs gadget 是唯一存在的框架，
+        // 老 sysfs（/sys/class/android_usb）只在 Android 4.x 内核存在，不再探测
+        val lunCandidates = listOf(
+            "$cfgRoot/usb_gadget/g1/functions/mass_storage.0/lun.0",
+            "$cfgRoot/usb_gadget/g1/functions/mass_storage.0/lun"
+        )
         var foundLun = ""
         for (attempt in 1..10) {
             Thread.sleep(500)
@@ -156,9 +164,9 @@ object UsbGadgetController {
                 }
             }
             // Also glob in case init placed it at a non-standard path
-            if (foundLun.isEmpty() && configFs.isNotEmpty()) {
+            if (foundLun.isEmpty()) {
                 foundLun = Shell.cmd(
-                    "for g in $configFs/usb_gadget/*/functions/mass_storage.*/lun.*; do [ -d \"\$g\" ] && echo \"\$g\"; done 2>/dev/null"
+                    "for g in $cfgRoot/usb_gadget/*/functions/mass_storage.*/lun.*; do [ -d \"\$g\" ] && echo \"\$g\"; done 2>/dev/null"
                 ).exec().out.firstOrNull { it.isNotBlank() }?.trim() ?: ""
             }
             if (foundLun.isNotEmpty()) {
@@ -206,11 +214,11 @@ object UsbGadgetController {
         }
 
         Log.w(TAG, "No LUN appeared after setprop — trying configfs-direct mount (self-built gadget, no adb dependency)")
-                val ownLun = tryConfigfsDirectMount(configFs, escapedPath, roFlag, cdromFlag)
-                if (ownLun != null && pollGadgetActive(ownLun)) {
-                    return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
-                }
-                Shell.cmd("setprop sys.usb.config adb").exec()
+        val ownLun = tryConfigfsDirectMount(configFs, escapedPath, roFlag, cdromFlag)
+        if (ownLun != null && pollGadgetActive(ownLun)) {
+            return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
+        }
+        Shell.cmd("setprop sys.usb.config adb").exec()
         Log.w(TAG, "configfs-direct mount failed (no HAL-created LUN)")
         MountDiag.write("no-lun", "setprop 后无 LUN 出现，configfs-direct 回退失败（无开发者选项场景主路径）")
         return Pair(false, "挂载失败：内核没有创建 mass_storage LUN，configfs 直接管线也未成功。\n" +
@@ -235,8 +243,12 @@ object UsbGadgetController {
         Shell.cmd(
             "mkdir -p $fn/lun.0 $cfg 2>/dev/null || true",
             "[ -f $base/idVendor ] || { echo 0x18d1 > $base/idVendor 2>/dev/null || true; echo 0x4ee7 > $base/idProduct 2>/dev/null || true; }",
-            // 链接只在门开时能创建（本开机周期首次 setprop 前）；已存在则跳过
-            "[ -e $cfg/mass_storage.0 ] || ln -sf $fn $cfg/mass_storage.0 2>/dev/null || true",
+            // 链接只在门开时能创建（本开机周期首次 setprop 前）；已存在则跳过。
+            // 必须 cd+相对路径：vendor 伪 fs（MI 6 的 /config）拒绝绝对路径
+            // symlink，此前这里用绝对路径等于在 MI 6 上从未建成过
+            "cd $base 2>/dev/null || true",
+            "[ -e configs/b.1/mass_storage.0 ] || ln -s functions/mass_storage.0 configs/b.1/mass_storage.0 2>/dev/null || true",
+            "cd /",
             "echo '$roFlag' > $fn/lun.0/ro 2>/dev/null || true",
             "echo '$cdromFlag' > $fn/lun.0/cdrom 2>/dev/null || true",
             "echo 1 > $fn/lun.0/nofua 2>/dev/null || true",
@@ -256,10 +268,10 @@ object UsbGadgetController {
     private fun tryConfigfsDirectMount(
         configFs: String, escapedPath: String, roFlag: String, cdromFlag: String
     ): String? {
-        val base = if (configFs.isNotEmpty()) "$configFs/usb_gadget/ps0" else "/config/usb_gadget/ps0"
-        val g1 = if (configFs.isNotEmpty()) "$configFs/usb_gadget/g1" else "/config/usb_gadget/g1"
-        val udcDev = Shell.cmd("ls /sys/class/udc/ 2>/dev/null | head -n1").exec()
-            .out.firstOrNull()?.trim() ?: ""
+        val root = configFs.ifEmpty { "/config" }
+        val base = "$root/usb_gadget/ps0"
+        val g1 = "$root/usb_gadget/g1"
+        val udcDev = getUdcName()
         if (udcDev.isEmpty()) return null
         // 完全自愈：ROM 的 USB 状态机在配置回退/模式切换时会清掉外来 gadget
         // 树（MI 6 实测 ps0 被删），所以每次回退都完整重建。全程 cd+相对路径
@@ -278,7 +290,9 @@ object UsbGadgetController {
             "[ -e configs/b.1/mass_storage.0 ] || ln -s functions/mass_storage.0 configs/b.1/mass_storage.0 2>/dev/null || true",
             "echo '$udcDev' > UDC 2>/dev/null || true",
             "sleep 1",
-            "if [ -n \"\$(cat UDC 2>/dev/null)\" ] && [ -e configs/b.1/mass_storage.0 ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
+            "if [ -n \"\$(cat UDC 2>/dev/null)\" ] && [ -e configs/b.1/mass_storage.0 ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi",
+            // libsu 持久 shell 跨 cmd 调用共享 cwd，上面 cd 进了 base，收尾退回根目录
+            "cd /"
         ).exec()
         val ok = res.out.any { it.contains("STATUS=OK") }
         Log.d(TAG, "configfs-direct mount: ${res.out.joinToString(" | ")} err=${res.err}")
@@ -286,43 +300,50 @@ object UsbGadgetController {
     }
 
     /**
-     * 判断 LUN 所在的 gadget 是否已真正对主机生效：
-     * - configfs 路径：gadget 绑定了 UDC（`UDC` 非空）且该 function 已链进某个
-     *   configuration。HAL 重新配置 USB（比如只留 adb）时会摘掉 mass_storage
-     *   链接，此时即使 UDC 还绑着（adb 在用）、lun.0/file 有残留，主机也看不到盘。
-     * - 老 sysfs（android_usb）路径：看 android0/enable。
-     * 只做一次检查（最多等 [timeoutMs]，每 500ms 一轮）。
+     * ACTIVE 判定的共享 shell 实现：gadget 绑定了 UDC（`UDC` 非空）且该
+     * function 已链进某个 configuration（同名链接，或 readlink 解析目标匹配——
+     * MIUI/ColorOS 等 HAL 起的链接名不等于函数名，如 function2/f2）。
+     * pollGadgetActive 与 getMountStatus 必须同一套判定，否则 UI 状态和
+     * 真实状态会打架。用法：ACTIVE=$(ps_gadget_active <lun路径>)，输出 0/1。
+     */
+    private val gadgetActiveShellFn = listOf(
+        "ps_gadget_active() {",
+        "  LUN=\"\$1\"",
+        "  ACTIVE=0",
+        "  case \"\$LUN\" in",
+        "    */functions/*)",
+        "      GADGET=\"\${LUN%/functions/*}\"",
+        "      FUNC=\"\${LUN#*/functions/}\"; FUNC=\"\${FUNC%%/*}\"",
+        "      if [ -n \"\$(cat \"\$GADGET/UDC\" 2>/dev/null)\" ]; then",
+        "        for cfg in \"\$GADGET\"/configs/*/; do",
+        "          if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break; fi",
+        "          for link in \"\${cfg}\"*; do",
+        "            case \"\$(readlink -f \"\$link\" 2>/dev/null)\" in",
+        "              */functions/\$FUNC) ACTIVE=1; break 2 ;;",
+        "            esac",
+        "          done",
+        "        done",
+        "      fi",
+        "      ;;",
+        "  esac",
+        "  echo \"\$ACTIVE\"",
+        "}"
+    ).joinToString("\n")
+
+    /**
+     * 轮询 LUN 所在 gadget 是否已真正对主机生效：HAL 重新配置 USB（比如只留
+     * adb）时会摘掉 mass_storage 链接，此时即使 UDC 还绑着（adb 在用）、
+     * lun.0/file 有残留，主机也看不到盘。判定条件见 [gadgetActiveShellFn]。
+     * 最多等 [timeoutMs]，每 500ms 一轮。
      */
     private fun pollGadgetActive(lunPath: String, timeoutMs: Long = 5000): Boolean {
         val deadline = System.currentTimeMillis() + timeoutMs
         while (true) {
-            val script = buildList {
-                add("LUN='$lunPath'")
-                add("ACTIVE=0")
-                add("case \"\$LUN\" in")
-                add("  */functions/*)")
-                add("    GADGET=\"\${LUN%/functions/*}\"")
-                add("    FUNC=\"\${LUN#*/functions/}\"; FUNC=\"\${FUNC%%/*}\"")
-                add("    if [ -n \"\$(cat \"\$GADGET/UDC\" 2>/dev/null)\" ]; then")
-                add("      for cfg in \"\$GADGET\"/configs/*/; do")
-                add("        if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break; fi")
-                // MIUI 等 HAL 起的链接名不等于函数名（如 function2 -> mass_storage.0），
-                // 再按解析后的目标路径兜底认一遍
-                add("        for link in \"\${cfg}\"*; do")
-                add("          case \"\$(readlink -f \"\$link\" 2>/dev/null)\" in")
-                add("            */functions/\$FUNC) ACTIVE=1; break 2 ;;")
-                add("          esac")
-                add("        done")
-                add("      done")
-                add("    fi")
-                add("    ;;")
-                add("  /sys/class/android_usb/*)")
-                add("    [ \"\$(cat /sys/class/android_usb/android0/enable 2>/dev/null)\" = \"1\" ] && ACTIVE=1")
-                add("    ;;")
-                add("esac")
-                add("echo \"ACTIVE=\$ACTIVE\"")
-            }.toTypedArray()
-            val res = Shell.cmd(*script).exec()
+            val res = Shell.cmd(
+                gadgetActiveShellFn,
+                "ACTIVE=\$(ps_gadget_active '$lunPath')",
+                "echo \"ACTIVE=\$ACTIVE\""
+            ).exec()
             if (res.out.firstOrNull { it.startsWith("ACTIVE=") } == "ACTIVE=1") {
                 return true
             }
@@ -338,34 +359,29 @@ object UsbGadgetController {
 
         val configFs = getConfigFsPath()
         val udcName = getUdcName()
+        val cfgRoot = configFs.ifEmpty { "/config" }
 
         val unmountScript = buildList {
-            if (configFs.isNotEmpty()) {
-                // 清掉 2.4.2 及以前自建 swy gadget 的残留（那套方案已删，
-                // 但老版本可能留下半截目录树，会干扰排查）
-                add("echo '' > $configFs/usb_gadget/swy/UDC 2>/dev/null || true")
-                add("if [ -d $configFs/usb_gadget/swy ]; then cd $configFs/usb_gadget/swy 2>/dev/null && rm -f configs/swyconfig.1/mass_storage.0 2>/dev/null; rmdir configs/swyconfig.1/strings/0x409 2>/dev/null; rmdir configs/swyconfig.1 2>/dev/null; rmdir functions/mass_storage.0 2>/dev/null; rmdir strings/0x409 2>/dev/null; cd ..; rmdir swy 2>/dev/null; fi || true")
-                // Restore g1 gadget UDC
-                if (udcName.isNotEmpty()) {
-                    add("echo '$udcName' > $configFs/usb_gadget/g1/UDC 2>/dev/null || true")
-                }
+            // Restore g1 gadget UDC（HAL 托管树；sys.usb.config 的恢复在下面统一做）
+            if (udcName.isNotEmpty()) {
+                add("echo '$udcName' > $cfgRoot/usb_gadget/g1/UDC 2>/dev/null || true")
             }
             // Clear file from all known LUN paths using glob（含自建 ps0）
-            add("for lun in $configFs/usb_gadget/*/functions/mass_storage.*/lun.* /config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/kernel/config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/class/android_usb/android0/f_mass_storage/lun0 /sys/class/android_usb/android0/f_mass_storage/lun; do")
+            add("for lun in $cfgRoot/usb_gadget/*/functions/mass_storage.*/lun.*; do")
             add("  [ -f \"\$lun/file\" ] && echo '' > \"\$lun/file\" 2>/dev/null || true")
             add("done")
             // 自建 ps0 gadget：解绑（树保留，下次挂载复用；g1 由 setprop 恢复）
-            add("echo '' > $configFs/usb_gadget/ps0/UDC 2>/dev/null || true")
+            add("echo '' > $cfgRoot/usb_gadget/ps0/UDC 2>/dev/null || true")
             // configfs 直接管线：清理我们链进 configuration 的 mass_storage
             // （存在才动：解绑 → 摘链接 → 重绑）。HAL 托管的设备此时链接已被
             // HAL 摘掉，此循环为空转。
-            add("for g in $configFs/usb_gadget/*/; do")
+            add("for g in $cfgRoot/usb_gadget/*/; do")
             add("  case \"\$g\" in *usb_gadget/ps0/) continue;; esac")
             add("  for c in \"\$g\"configs/*/; do")
             add("    if [ -e \"\${c}mass_storage.0\" ]; then")
             add("      echo '' > \"\$g\"UDC 2>/dev/null")
             add("      rm -f \"\${c}mass_storage.0\"")
-            add("      echo \"\$(ls /sys/class/udc/ 2>/dev/null | head -1)\" > \"\$g\"UDC 2>/dev/null")
+            add("      echo '$udcName' > \"\$g\"UDC 2>/dev/null")
             add("    fi")
             add("  done")
             add("done")
@@ -411,49 +427,23 @@ object UsbGadgetController {
         if (!isRootAvailable()) return MountStatus()
 
         val configFs = getConfigFsPath()
+        val cfgRoot = configFs.ifEmpty { "/config" }
 
-        // Build LUN scan list dynamically from configfs, plus known fallbacks
         val checkScript = buildList {
+            add(gadgetActiveShellFn)
             add("LUN_FILE=''")
             add("LUN_RO=''")
             add("LUN_CD=''")
             add("LUN_PATH=''")
-            if (configFs.isNotEmpty()) {
-                add("for lun in $configFs/usb_gadget/*/functions/mass_storage.*/lun.*; do")
-            } else {
-                add("for lun in /config/usb_gadget/g1/functions/mass_storage.0/lun.0 /sys/kernel/config/usb_gadget/g1/functions/mass_storage.0/lun.0 /sys/class/android_usb/android0/f_mass_storage/lun0; do")
-            }
+            add("for lun in $cfgRoot/usb_gadget/*/functions/mass_storage.*/lun.*; do")
             add("  if [ -f \"\$lun/file\" ]; then")
             add("    CONTENT=\$(cat \"\$lun/file\" 2>/dev/null)")
             add("    if [ -n \"\$CONTENT\" ]; then")
             // P2：lun.0/file 非空只说明内核记住了这个文件，不代表主机真的在用。
-            // HAL 重新配置 USB 时会摘掉 function 的 configuration 链接（此时
-            // UDC 可能仍被 adb 占用着），所以两个条件都要看：
-            //   1. gadget 绑定了 UDC（UDC 非空）
-            //   2. 该 function 链进了某个 configuration
-            // 老 sysfs（android_usb）路径看 android0/enable。
-            add("      ACTIVE=0")
-            add("      case \"\$lun\" in")
-            add("        */functions/*)")
-            add("          GADGET=\"\${lun%/functions/*}\"")
-            add("          FUNC=\"\${lun#*/functions/}\"; FUNC=\"\${FUNC%%/*}\"")
-            add("          if [ -n \"\$(cat \"\$GADGET/UDC\" 2>/dev/null)\" ]; then")
-            add("            for cfg in \"\$GADGET\"/configs/*/; do")
-            add("              # break（而非 break 2）：只退出本层，让外层的 LUN 赋值逻辑执行\n              if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break; fi")
-            // MIUI 等 HAL 起的链接名不等于函数名（如 function2 -> mass_storage.0），
-            // 再按解析后的目标路径兜底认一遍
-            add("              for link in \"\${cfg}\"*; do")
-            add("                case \"\$(readlink -f \"\$link\" 2>/dev/null)\" in")
-            add("                  */functions/\$FUNC) ACTIVE=1; break 2 ;;")
-            add("                esac")
-            add("              done")
-            add("            done")
-            add("          fi")
-            add("          ;;")
-            add("        /sys/class/android_usb/*)")
-            add("          [ \"\$(cat /sys/class/android_usb/android0/enable 2>/dev/null)\" = \"1\" ] && ACTIVE=1")
-            add("          ;;")
-            add("      esac")
+            // 还要满足 ACTIVE 判定（UDC 绑定 + configuration 链接）——与
+            // pollGadgetActive 同源（gadgetActiveShellFn），否则 UI 状态和
+            // 真实状态会打架。
+            add("      ACTIVE=\$(ps_gadget_active \"\$lun\")")
             add("      if [ \"\$ACTIVE\" = \"1\" ]; then")
             add("        LUN_FILE=\"\$CONTENT\"")
             add("        LUN_RO=\$(cat \"\$lun/ro\" 2>/dev/null)")
