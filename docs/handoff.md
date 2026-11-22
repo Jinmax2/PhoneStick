@@ -504,6 +504,7 @@ U 盘挂载：门开时可用的机型 + 一加 15 这类 HAL 原生支持的机
 | 卸载 | ✅ | file 清空、HAL 摘掉 f2、主机盘消失（/dev/sda 变 0B 空节点属正常） |
 | **App 全流程**（选镜像→挂载→卸载） | ✅ | UI"已挂载"↔"未挂载"与主机状态全程一致 |
 | **Windows 主机识别**（用户实测） | ✅ | `22D9:2767` + MS@MI_01 在用户 Windows 上直接出盘、可打开——该机器没装抢占 MS 接口的一加/Oplus OEM 驱动，`usbstor.inf` 正常绑定；历史上 OPLUS `oem213.inf` 抢 MI_01 的事故没有复现条件 |
+| **USB 调试关闭时的挂载** | ❌ | 实测（关 `adb_enabled` 后 setprop mass_storage,adb）：HAL 回退到 MTP（`state=mtp`），mass_storage 不生效，主机无盘。**一加 15 的 U 盘挂载依赖 adbd/ffs 链路，需保持开发者模式 + USB 调试开启**（对 root 用户属常态）；App 的浏览/回收/创建等功能不需要 |
 | pstrim 现场残留 | 观察 | g1 之外还有一个 `ps` gadget（上游 com.phonestick 自建，LUN 残留 `/0/DataBackup/Ventoy.img`）；新状态逻辑的 glob 扫所有 gadget，UDC 未绑的会被正确跳过 |
 
 **KernelSU 授权的两个坑**（MI 6 是 Magisk，没这些问题）：
