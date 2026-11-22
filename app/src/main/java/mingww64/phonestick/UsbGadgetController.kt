@@ -245,8 +245,12 @@ object UsbGadgetController {
     }
 
     /**
-     * ConfigFS 直接管线的回退执行：HAL 尝试 mass_storage 失败（通常已
-     * 回退 MTP、adb 断开）后，释放 g1 的 UDC 并绑定预建好的 ps0。
+     * ConfigFS 直接管线的回退执行（DdogezD/phonestick 同款时序，无 adb
+     * 依赖）：
+     * 1. 链接 function——g1 仍绑定 UDC、本次开机未写 sys.usb.config 时
+     *    门是开的（实测门控只在 setprop/框架动过 USB 配置后武装）
+     * 2. 解绑 g1（adb 瞬断）
+     * 3. 绑定 ps0（配置内已含链接）→ 主机出盘
      * 返回 ps0 的 LUN 路径（供 pollGadgetActive 验证），失败返回 null。
      */
     private fun tryConfigfsDirectMount(configFs: String): String? {
@@ -255,24 +259,22 @@ object UsbGadgetController {
         val udcDev = Shell.cmd("ls /sys/class/udc/ 2>/dev/null | head -n1").exec()
             .out.firstOrNull()?.trim() ?: ""
         if (udcDev.isEmpty()) return null
-        // 关键：全程不碰 sys.usb.config（setprop 会触发 init/HAL 状态机，
-        // 解绑会被抢绑、门控会被武装——这是此前失败的根源）。直接裸操作：
-        // 解绑 g1（init 对无属性变化的解绑不反应）→ 绑 ps0。
         val res = Shell.cmd(
+            // 1. 链接先建（g1 绑定中、本次开机未写 sys.usb.config → 门开）
+            "ln -sf $base/functions/mass_storage.0 $base/configs/b.1/mass_storage.0 2>/dev/null || true",
+            // 2. 解绑 g1（adb 瞬断）
             "echo '' > $g1/UDC 2>/dev/null || true",
             "sleep 0.5",
+            // 3. 绑定 ps0（配置内已含链接）
             "echo '$udcDev' > $base/UDC 2>/dev/null || true",
             "sleep 1",
             "if [ -n \"\$(cat $base/UDC 2>/dev/null)\" ] && [ -e \"$base/configs/b.1/mass_storage.0\" ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
         ).exec()
         val ok = res.out.any { it.contains("STATUS=OK") }
         Log.d(TAG, "configfs-direct mount: ${res.out.joinToString(" | ")} err=${res.err}")
-        if (!ok) {
-            // 绑定失败：恢复原 USB 配置（撤掉 sys.usb.config=none 的残留，找回 adb）
-            Shell.cmd("setprop sys.usb.config adb").exec()
-        }
         return if (ok) "$base/functions/mass_storage.0/lun.0" else null
     }
+
     /**
      * 判断 LUN 所在的 gadget 是否已真正对主机生效：
      * - configfs 路径：gadget 绑定了 UDC（`UDC` 非空）且该 function 已链进某个
