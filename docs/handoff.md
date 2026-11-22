@@ -488,6 +488,18 @@ CONFIGFS_MAGIC 校验、绝对路径 symlink）、DriveDroid-fix Magisk
 lineage-21 或 crDroid 14.0 的 kernel），或重启碰运气（门按开机
 周期定）。
 
+**一加 15 的同类门控已定位（ftrace kprobe 实测）**：在 kernel 6.12
+上注册 return-kprobe（configfs_symlink）后复现失败 ln——**trace 0 命中**，
+即 EPERM 在进入 configfs_symlink 之前就产生 → VFS/LSM 层拦截
+（ColorOS/OPlus vendor 内核安全特性，推测保护 HAL 托管的 g1；
+HAL 自建链接不受限）。上游 com.phonestick 的 ps gadget 链接
+（历史遗留）说明该拦截存在状态性。排查工具已验证可用：
+`/sys/kernel/debug/tracing` + kprobe_events（脚本形态见 git 历史）。
+结论：一加 15 上 App 无法自建 configfs 链接 → 挂载必须走
+HAL/setprop 路径 → **USB 调试（adbd）是硬性前置条件**（实测关调试
+时 HAL 回退 MTP）。MI 6 的 EPERM 层级尚未 kprobe 定性（机器暂
+离线），工具相同可随时补测。
+
 MI 6 可稳定使用：镜像创建/浏览/读出/删除、空间回收、格式化。
 U 盘挂载：门开时可用的机型 + 一加 15 这类 HAL 原生支持的机型。
 
