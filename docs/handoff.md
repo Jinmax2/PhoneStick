@@ -573,3 +573,70 @@ U 盘挂载：门开时可用的机型 + 一加 15 这类 HAL 原生支持的机
   独立渲染、任何 ROM 可预期。MI 6 双模式像素采样回归：状态栏与工具栏
   完全同色（浅 #FAFDFD、深 #111315 贯通）。
 - README 更新版本表、pstrim 源码路径、已知限制（多分区回收早就是现状）。
+
+## 十六、2.4.5：代码清理 + APK 优化（2026-11-22 晚）
+
+功能与 UI 稳定后的维护轮：剔除无用/过时代码、简化结构、R8 优化产物。
+**原则：不动已真机验证的挂载管线语义**（ps0 前置 → setprop → configfs-direct
+回退的时序与判定条件保持等价，仅去重与删除）。
+
+### 1. UsbGadgetController 瘦身（488 → 约 440 行）
+
+- 删 swy gadget 残留清理块（2.4.3 已删方案，清理代码过时）。
+- **删 android_usb 老 sysfs 路径**（LUN 候选 / ACTIVE 分支 / 卸载 glob 共 5 处）：
+  依据 minSdk 24——Android 7.0 起设备全部走 configfs gadget，
+  `/sys/class/android_usb` 是 Android 4.x 时代的接口，代码不可达。
+- **ACTIVE 判定去重**：`pollGadgetActive` 与 `getMountStatus` 各持一份 ~20 行
+  相同的 shell 判定（UDC 绑定 + configuration 链接 + readlink 兜底），提取为
+  共享 `gadgetActiveShellFn`（shell 函数 `ps_gadget_active`，判定文本与原实现
+  一致仅参数化）。`tools/verify-status-logic.sh` 的 new_logic 同步改为调用
+  同名函数，保持三方（app 轮询 / app 状态 / 差分脚本）同源——**改判定必须
+  两边同步改**。
+- UDC 探测收口到 `getUdcName()`（tryConfigfsDirectMount / unmountImage 的
+  内联 `ls /sys/class/udc/` 各删一份）。
+- **ensureOwnGadget 链接改 cd+相对路径**：原来 239 行用绝对路径 `ln -sf`，
+  在 MI 6 伪 fs 上会静默 EPERM——等于"门开窗口期建链接"在 MI 6 上从未真正
+  生效过（此前全靠 configfs-direct 回退兜住）。改后与 DdogezD 时序完全一致，
+  门关前链接就能建成。
+- **cwd 泄漏防护**：libsu 持久 shell 跨 cmd 调用共享 cwd——
+  tryConfigfsDirectMount 结尾补 `cd /`（其 `cd $base` 原本一直泄漏到后续调用）。
+- `getConfigFsPath()` 结果缓存（`@Volatile`，只缓存非空）：状态轮询路径每次
+  省 2-3 个 root shell 往返；configfs 挂载点每次开机稳定，缓存安全。
+
+### 2. 死代码清除（每处删前 grep 复核零引用）
+
+MainActivity 不可达分支；ImageChooser 的 Toast import、external_images prefs
+残留三函数 + 两调用点；fs 包：`Bytes.be16/be32/ascii`、`Record.inUse`、
+`Part.index`/`Part.sizeMb`/`Layout.imageSize`（只写不读）；ImageStore 的
+`EXTERNAL_DIR`/`isManagedPath`/`Info.isSparse`/静态 `isSparse`；ImageCreator
+的 `lastErrors`；ImageFsMount 的 `MountedImageFs.imagePath`、双份 `esc()`
+（合到文件级）、`cleanupStale` 转 private。
+
+### 3. 资源与仓库
+
+- strings.xml 删 8 个零引用条目；整删 `menu_image_chooser.xml`、未用 dimens
+  （保留 dialog_license 在用的 `activity_vertical_margin`）、`values-w820dp`。
+- **整删 `values-de/fr/it/lt`**（各 14 条残缺翻译，与汉化优先矛盾）、
+  **`fastlane/`**（F-Droid 元数据，与放弃 F-Droid 决策一致——`metadata/` 的
+  另一半）；README 引用的图标/截图恢复到 `docs/img/`。
+- 删未被 licenses.xml 引用的 `assets/licenses/{afilechooser,libsuperuser}.txt`。
+
+### 4. 构建优化
+
+- **release 开 `minifyEnabled true` + `shrinkResources true`**：
+  release APK **5.48MB（2.4.4 线上）→ 2.53MB（-54%）**；R8 首跑一次通过，
+  自身代码无反射/JNI，libsu/material/appcompat 自带 consumer rules，
+  proguard-rules.pro 只留注释。**改判定/裁剪后必须真机回归 release 包**。
+- 删依赖 `core-ktx` / `constraintlayout` / `fragment-ktx`（零使用，编译验证）；
+  删 `android.enableJetifier`（全 AndroidX，白耗构建时间）；`lintOptions` →
+  `lint {}`（AGP 8.5）。版本 versionCode 27 / versionName 2.4.5。
+
+### 5. 验证（2026-11-22）
+
+| 项 | 结果 |
+|---|---|
+| JVM 单测 | ✅ 16/16 |
+| pstrim 主机回归 | ✅ 7/7（`sudo tools/regression-pstrim.sh`） |
+| assembleDebug / assembleRelease(R8) | ✅ 一次通过 |
+| ACTIVE 判定 shell 函数本地差分 | ✅ 5 场景（无 UDC/缺链接/同名链接/HAL 别名/非 gadget 路径） |
+| **真机回归（MI 6 release 包：状态差分 + 挂载/卸载全链路）** | ⏳ 设备未连接，待接入后补（含 Magisk uid 变化后的 su 授权处理） |
