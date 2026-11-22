@@ -1,17 +1,7 @@
-# Add project specific ProGuard rules here.
-# By default, the flags in this file are appended to flags specified
-# in /home/streetwalrus/android-sdk/tools/proguard/proguard-android.txt
-# You can edit the include path and order by changing the proguardFiles
-# directive in build.gradle.
+# R8 规则（release 开启 minifyEnabled + shrinkResources）。
 #
-# For more details, see
-#   http://developer.android.com/guide/developing/tools/proguard.html
-
-# Add any project specific keep options here:
-
-# If your project uses WebView with JS, uncomment the following
-# and specify the fully qualified class name to the JavaScript interface
-# class:
-#-keepclassmembers class fqcn.of.javascript.interface.for.webview {
-#   public *;
-#}
+# 项目自身无反射/JNI/序列化，libsu、material、appcompat 等库自带 consumer
+# rules，通常无需额外 keep。若真机回归发现 release 包行为异常，先怀疑
+# R8 裁剪，再考虑在这里补 keep 规则。
+#
+# 参考: https://developer.android.com/build/shrink-code
