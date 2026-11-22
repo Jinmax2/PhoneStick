@@ -154,11 +154,6 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     size = info.size
                     used = info.usedBytes
-                    // 已挂载但还没选中时，用内核里记录的路径反填
-                    if (path.isEmpty() && status.isMounted) {
-                        path = ImageStore.toUserPath(status.currentFile)
-                        saveSelectedImagePath(path)
-                    }
                 }
             } else if (path.isEmpty() && status.isMounted && status.currentFile.isNotEmpty()) {
                 path = ImageStore.toUserPath(status.currentFile)

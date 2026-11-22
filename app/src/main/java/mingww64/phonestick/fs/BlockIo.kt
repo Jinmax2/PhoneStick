@@ -33,22 +33,12 @@ object Bytes {
 
     fun le64(b: ByteArray, o: Int): Long = le32(b, o) or (le32(b, o + 4) shl 32)
 
-    fun be16(b: ByteArray, o: Int): Int = (u8(b, o) shl 8) or u8(b, o + 1)
-
-    fun be32(b: ByteArray, o: Int): Long = (be16(b, o).toLong() shl 16) or be16(b, o + 2).toLong()
-
     fun matches(b: ByteArray, o: Int, s: String): Boolean {
         if (o < 0 || o + s.length > b.size) return false
         for (i in s.indices) {
             if (b[o + i] != s[i].code.toByte()) return false
         }
         return true
-    }
-
-    fun ascii(b: ByteArray, o: Int, len: Int): String {
-        val n = minOf(len, b.size - o).coerceAtLeast(0)
-        if (n <= 0) return ""
-        return String(b, o, n, Charsets.US_ASCII)
     }
 }
 

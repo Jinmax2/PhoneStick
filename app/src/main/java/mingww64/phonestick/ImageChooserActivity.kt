@@ -6,7 +6,6 @@ import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.view.View
-import android.widget.Toast
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
@@ -265,7 +264,6 @@ class ImageChooserActivity : AppCompatActivity() {
                 UsbGadgetController.unmountImage(this@ImageChooserActivity)
             }
             
-            removeExternalImagePath(file.absolutePath)
             // 用 shell 删除：镜像属主可能是 root/media_rw，app 的 File.delete() 会失败。
             // 优先走 /sdcard（FUSE）路径：MediaProvider 会同步删掉自己的记录，
             // 否则文件管理器里会残留一条指向已删除文件的「幽灵」条目。
@@ -550,25 +548,6 @@ class ImageChooserActivity : AppCompatActivity() {
                 ext.equals("raw", ignoreCase = true) ||
                 ext.equals("vhd", ignoreCase = true) ||
                 ext.equals("qcow2", ignoreCase = true)
-    }
-
-    private fun getExternalImagePaths(): Set<String> {
-        val prefs = getSharedPreferences("phonestick", Context.MODE_PRIVATE)
-        return prefs.getStringSet("external_images", emptySet()) ?: emptySet()
-    }
-
-    private fun addExternalImagePath(path: String) {
-        val prefs = getSharedPreferences("phonestick", Context.MODE_PRIVATE)
-        val current = prefs.getStringSet("external_images", emptySet())?.toMutableSet() ?: mutableSetOf()
-        current.add(path)
-        prefs.edit().putStringSet("external_images", current).apply()
-    }
-
-    private fun removeExternalImagePath(path: String) {
-        val prefs = getSharedPreferences("phonestick", Context.MODE_PRIVATE)
-        val current = prefs.getStringSet("external_images", emptySet())?.toMutableSet() ?: mutableSetOf()
-        current.remove(path)
-        prefs.edit().putStringSet("external_images", current).apply()
     }
 
     private val requestNotificationPermissionLauncher = registerForActivityResult(
@@ -857,7 +836,6 @@ class ImageChooserActivity : AppCompatActivity() {
                         currentlySelectedPath = ""
                     }
                 }
-                removeExternalImagePath(file.absolutePath)
                 val e = file.absolutePath.replace("'", "'\\''")
                 com.topjohnwu.superuser.Shell.cmd("rm -f '$e'").exec()
             }

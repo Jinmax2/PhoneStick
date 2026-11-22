@@ -14,19 +14,14 @@ package mingww64.phonestick.fs
 object VolumeLayout {
 
     data class Part(
-        val index: Int,
         val offset: Long,
         val size: Long,
         val fs: FsKind
-    ) {
-        /** 分区大小（人类可读，日志用） */
-        val sizeMb: Long get() = size / (1024 * 1024)
-    }
+    )
 
     data class Layout(
         val scheme: String,
-        val parts: List<Part>,
-        val imageSize: Long
+        val parts: List<Part>
     ) {
         val usable: List<Part> get() = parts.filter { it.fs != FsKind.UNKNOWN }
     }
@@ -35,7 +30,7 @@ object VolumeLayout {
 
     fun parse(io: BlockIo): Layout {
         val size = io.size
-        if (size < SECTOR) return Layout("空文件", emptyList(), size)
+        if (size < SECTOR) return Layout("空文件", emptyList())
 
         var scheme = "无分区表"
         var parts: List<Part> = emptyList()
@@ -67,11 +62,11 @@ object VolumeLayout {
 
         if (parts.isEmpty()) {
             scheme = "无分区表"
-            parts = listOf(Part(0, 0L, size, FsKind.UNKNOWN))
+            parts = listOf(Part(0L, size, FsKind.UNKNOWN))
         }
 
         val filled = parts.map { it.copy(fs = FsKind.detect(io, it.offset)) }
-        return Layout(scheme, filled, size)
+        return Layout(scheme, filled)
     }
 
     private fun parseMbr(mbr: ByteArray, fileSize: Long): List<Part> {
@@ -89,7 +84,7 @@ object VolumeLayout {
             if (off + 1024 > fileSize) continue
             var sz = secs * SECTOR
             if (off + sz > fileSize) sz = fileSize - off
-            out.add(Part(i + 1, off, sz, FsKind.UNKNOWN))
+            out.add(Part(off, sz, FsKind.UNKNOWN))
         }
         return out
     }
@@ -129,7 +124,7 @@ object VolumeLayout {
                 if (off + 1024 > fileSize) continue
                 var sz = (last - first + 1) * SECTOR
                 if (off + sz > fileSize) sz = fileSize - off
-                out.add(Part(i + k + 1, off, sz, FsKind.UNKNOWN))
+                out.add(Part(off, sz, FsKind.UNKNOWN))
             }
             i += chunkEntries
         }

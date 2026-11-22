@@ -387,7 +387,6 @@ private class Attr(
 )
 
 private class Record(val buf: ByteArray) {
-    val inUse: Boolean get() = (Bytes.le16(buf, 0x16) and 0x01) != 0
     val isDir: Boolean get() = (Bytes.le16(buf, 0x16) and 0x02) != 0
     val attrs: List<Attr> by lazy { parseAttrs(buf) }
 

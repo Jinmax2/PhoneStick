@@ -44,8 +44,6 @@ object ImageFsMount {
         data class Err(val message: String, val detail: String = "") : OpenResult()
     }
 
-    private fun esc(s: String): String = s.replace("'", "'\\''")
-
     /**
      * 打开镜像。必须在 IO 线程调用（内部大量 su 往返）。
      *
@@ -189,7 +187,7 @@ object ImageFsMount {
             ).exec()
             val flags = flagRes.out.firstOrNull()?.trim().orEmpty()
             val effectiveRo = readOnly || flags.split(',').contains("ro")
-            return Attempt(MountedImageFs(image, loop, mnt, part.fs, effectiveRo), "")
+            return Attempt(MountedImageFs(loop, mnt, part.fs, effectiveRo), "")
         }
 
         val fail = res.out.firstOrNull { it.startsWith("PS_FAIL:") }
@@ -207,7 +205,7 @@ object ImageFsMount {
      * 这里只清理我们自己管的目录下、指向 /data/media/0/PhoneStick 的 loop，
      * 不碰系统或其他 App 的挂载。
      */
-    fun cleanupStale() {
+    private fun cleanupStale() {
         try {
             Shell.cmd(
                 "for d in $BASE/*; do",
@@ -224,12 +222,14 @@ object ImageFsMount {
     }
 }
 
+/** shell 单引号转义（ImageFsMount 与 MountedImageFs 共用） */
+private fun esc(s: String): String = s.replace("'", "'\\''")
+
 /**
  * 内核 loop 挂载出来的文件系统视图。所有操作都直接作用在挂载点上，
  * 因此写路径由内核文件系统驱动负责 —— 不重写数据、不担心元数据损坏。
  */
 class MountedImageFs(
-    val imagePath: String,
     val loopDevice: String,
     val mountPoint: String,
     val kind: FsKind,
@@ -241,8 +241,6 @@ class MountedImageFs(
 
     override val displayName: String get() = kind.label
     override val detail: String get() = "内核挂载 · $loopDevice → $mountPoint"
-
-    private fun esc(s: String): String = s.replace("'", "'\\''")
 
     private fun abs(rel: String): String {
         val n = ImageFs.normalize(rel)

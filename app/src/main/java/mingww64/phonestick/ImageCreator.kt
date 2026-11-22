@@ -5,7 +5,6 @@ import android.os.Looper
 import android.util.Log
 import com.topjohnwu.superuser.Shell
 import java.io.File
-import java.util.concurrent.ConcurrentHashMap
 import kotlin.concurrent.thread
 
 /**
@@ -39,9 +38,6 @@ object ImageCreator {
 
     private const val SECTOR = 512
     private const val START_LBA = 2048
-
-    /** 记录格式化失败原因，供 UI 展示 */
-    val lastErrors = ConcurrentHashMap<String, String>()
 
     fun createBlankImage(
         targetDirectory: File,

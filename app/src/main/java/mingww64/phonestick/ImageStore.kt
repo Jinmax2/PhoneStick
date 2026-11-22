@@ -25,9 +25,6 @@ object ImageStore {
 
     private const val TAG = "ImageStore"
 
-    /** /sdcard 下的镜像统一目录 */
-    const val EXTERNAL_DIR = "/sdcard/PhoneStick"
-
     /** 对应的真实路径（绕过 FUSE） */
     const val RAW_DIR = "/data/media/0/PhoneStick"
 
@@ -43,16 +40,6 @@ object ImageStore {
 
         /** 实际占用字节数（稀疏镜像小于 size） */
         val usedBytes: Long get() = allocatedBlocks * 512L
-
-        /** 是否稀疏：实际占用明显小于逻辑大小 */
-        /**
-         * 是否稀疏：实际占用小于逻辑容量。
-         *
-         * 注意「0 占用也算稀疏」——刚建好的裸盘镜像一个块都没分配，
-         * 正是最彻底的稀疏；早期的判断写成 usedBytes > 0，把这种情况漏掉了，
-         * 导致裸盘镜像既不显示占用、也没有「释放未使用空间」菜单项。
-         */
-        val isSparse: Boolean get() = valid && usedBytes < size
     }
 
     private fun escape(path: String): String = path.replace("'", "'\\''")
@@ -83,15 +70,6 @@ object ImageStore {
     fun toUserPath(path: String): String = when {
         path.startsWith("/data/media/0/") -> "/sdcard/" + path.removePrefix("/data/media/0/")
         else -> path
-    }
-
-    /**
-     * 判断一个路径是否属于本应用管理的镜像目录。
-     * 用于拒绝把 LUN 绑到任意位置（例如误绑到 /media/0 这种不存在的目录）。
-     */
-    fun isManagedPath(path: String): Boolean {
-        val raw = toRawPath(path)
-        return raw.startsWith("$RAW_DIR/")
     }
 
     /**
@@ -287,8 +265,4 @@ object ImageStore {
         if (usedBytes >= sizeBytes * 95 / 100) return base
         return "$base · 已用 ${formatSize(usedBytes)}"
     }
-
-    /** 稀疏判定（供 UI 层复用）：实际占用小于逻辑容量即为稀疏，0 占用也算 */
-    fun isSparse(sizeBytes: Long, usedBytes: Long): Boolean =
-        sizeBytes > 0 && usedBytes < sizeBytes
 }
