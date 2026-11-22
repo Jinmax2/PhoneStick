@@ -192,7 +192,7 @@ object UsbGadgetController {
                 // ROM 的 MTP 回退（mass_storage,adb 无法满足时 HAL 落到纯 MTP，
                 // adb 直接消失），所以先恢复原 USB 配置，再做解绑→链接→重绑。
                 Log.w(TAG, "LUN written but gadget not active — trying configfs-direct mount")
-                val ownLun = tryConfigfsDirectMount(configFs)
+                val ownLun = tryConfigfsDirectMount(configFs, escapedPath, roFlag, cdromFlag)
                 if (ownLun != null && pollGadgetActive(ownLun)) {
                     return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
                 }
@@ -206,7 +206,7 @@ object UsbGadgetController {
         }
 
         Log.w(TAG, "No LUN appeared after setprop — trying configfs-direct mount (self-built gadget, no adb dependency)")
-                val ownLun = tryConfigfsDirectMount(configFs)
+                val ownLun = tryConfigfsDirectMount(configFs, escapedPath, roFlag, cdromFlag)
                 if (ownLun != null && pollGadgetActive(ownLun)) {
                     return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
                 }
@@ -253,22 +253,32 @@ object UsbGadgetController {
      * 3. 绑定 ps0（配置内已含链接）→ 主机出盘
      * 返回 ps0 的 LUN 路径（供 pollGadgetActive 验证），失败返回 null。
      */
-    private fun tryConfigfsDirectMount(configFs: String): String? {
+    private fun tryConfigfsDirectMount(
+        configFs: String, escapedPath: String, roFlag: String, cdromFlag: String
+    ): String? {
         val base = if (configFs.isNotEmpty()) "$configFs/usb_gadget/ps0" else "/config/usb_gadget/ps0"
         val g1 = if (configFs.isNotEmpty()) "$configFs/usb_gadget/g1" else "/config/usb_gadget/g1"
         val udcDev = Shell.cmd("ls /sys/class/udc/ 2>/dev/null | head -n1").exec()
             .out.firstOrNull()?.trim() ?: ""
         if (udcDev.isEmpty()) return null
+        // 完全自愈：ROM 的 USB 状态机在配置回退/模式切换时会清掉外来 gadget
+        // 树（MI 6 实测 ps0 被删），所以每次回退都完整重建。全程 cd+相对路径
+        // （vendor 伪 fs 拒绝绝对路径 symlink）+ 零 setprop（不触发 init/HAL
+        // 状态机——这是此前失败的根源，DdogezD/phonestick 同款时序）。
         val res = Shell.cmd(
-            // 1. 链接先建（g1 绑定中、本次开机未写 sys.usb.config → 门开）
-            "ln -sf $base/functions/mass_storage.0 $base/configs/b.1/mass_storage.0 2>/dev/null || true",
-            // 2. 解绑 g1（adb 瞬断）
-            "echo '' > $g1/UDC 2>/dev/null || true",
+            "mkdir -p functions/mass_storage.0/lun.0 configs/b.1 2>/dev/null || true",
+            "cd $base 2>/dev/null || exit 1",
+            "[ -f idVendor ] || { echo 0x18d1 > idVendor 2>/dev/null || true; echo 0x4ee7 > idProduct 2>/dev/null || true; }",
+            "echo '$escapedPath' > functions/mass_storage.0/lun.0/file 2>/dev/null || true",
+            "echo '$roFlag' > functions/mass_storage.0/lun.0/ro 2>/dev/null || true",
+            "echo '$cdromFlag' > functions/mass_storage.0/lun.0/cdrom 2>/dev/null || true",
+            "echo 1 > functions/mass_storage.0/lun.0/nofua 2>/dev/null || true",
+            "echo '' > ../g1/UDC 2>/dev/null || true",
             "sleep 0.5",
-            // 3. 绑定 ps0（配置内已含链接）
-            "echo '$udcDev' > $base/UDC 2>/dev/null || true",
+            "[ -e configs/b.1/mass_storage.0 ] || ln -s functions/mass_storage.0 configs/b.1/mass_storage.0 2>/dev/null || true",
+            "echo '$udcDev' > UDC 2>/dev/null || true",
             "sleep 1",
-            "if [ -n \"\$(cat $base/UDC 2>/dev/null)\" ] && [ -e \"$base/configs/b.1/mass_storage.0\" ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
+            "if [ -n \"\$(cat UDC 2>/dev/null)\" ] && [ -e configs/b.1/mass_storage.0 ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
         ).exec()
         val ok = res.out.any { it.contains("STATUS=OK") }
         Log.d(TAG, "configfs-direct mount: ${res.out.joinToString(" | ")} err=${res.err}")
@@ -295,7 +305,7 @@ object UsbGadgetController {
                 add("    FUNC=\"\${LUN#*/functions/}\"; FUNC=\"\${FUNC%%/*}\"")
                 add("    if [ -n \"\$(cat \"\$GADGET/UDC\" 2>/dev/null)\" ]; then")
                 add("      for cfg in \"\$GADGET\"/configs/*/; do")
-                add("        if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break 2; fi")
+                add("        if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break; fi")
                 // MIUI 等 HAL 起的链接名不等于函数名（如 function2 -> mass_storage.0），
                 // 再按解析后的目标路径兜底认一遍
                 add("        for link in \"\${cfg}\"*; do")
@@ -429,7 +439,7 @@ object UsbGadgetController {
             add("          FUNC=\"\${lun#*/functions/}\"; FUNC=\"\${FUNC%%/*}\"")
             add("          if [ -n \"\$(cat \"\$GADGET/UDC\" 2>/dev/null)\" ]; then")
             add("            for cfg in \"\$GADGET\"/configs/*/; do")
-            add("              if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break 2; fi")
+            add("              # break（而非 break 2）：只退出本层，让外层的 LUN 赋值逻辑执行\n              if [ -e \"\${cfg}\$FUNC\" ]; then ACTIVE=1; break; fi")
             // MIUI 等 HAL 起的链接名不等于函数名（如 function2 -> mass_storage.0），
             // 再按解析后的目标路径兜底认一遍
             add("              for link in \"\${cfg}\"*; do")
