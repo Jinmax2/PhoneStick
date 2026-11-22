@@ -107,6 +107,15 @@ object UsbGadgetController {
         val configFs = getConfigFsPath()
         Log.d(TAG, "Mount: configFs=$configFs")
 
+        // 尽早建好自建 gadget 树（ps0）并链接 function——必须在任何
+        // setprop sys.usb.config 之前！实测（一加 15 / MI 6）：ROM 的 USB
+        // 栈发生"配置回退"（如 HAL 尝试 mass_storage 失败落到 MTP）后，
+        // configfs 的符号链接创建会被内核门控拒绝（EPERM），而门关之前
+        // 创建的链接持续有效。之后哪怕 setprop 路径失败，回退流程只需
+        // 解绑 g1 → 重绑 ps0 即可挂载（详见 docs/handoff.md 门控分析）。
+        // LUN 属性写入不受门控影响，此处一并写好。
+        ensureOwnGadget(escapedPath, roFlag, cdromFlag, configFs)
+
         // --- setprop sys.usb.config → wait for init to create LUN → write image ---
         // Android's init system watches sys.usb.config and automatically creates the
         // mass_storage gadget function when the property includes "mass_storage".
@@ -183,10 +192,9 @@ object UsbGadgetController {
                 // ROM 的 MTP 回退（mass_storage,adb 无法满足时 HAL 落到纯 MTP，
                 // adb 直接消失），所以先恢复原 USB 配置，再做解绑→链接→重绑。
                 Log.w(TAG, "LUN written but gadget not active — trying configfs-direct mount")
-                val restoreConfig = curConfig.ifEmpty { "adb" }
-                if (tryConfigfsDirectMount(foundLun, escapedPath, roFlag, cdromFlag, restoreConfig)
-                    && pollGadgetActive(foundLun)) {
-                    return Pair(true, "挂载成功（ConfigFS 直接管线，$foundLun）")
+                val ownLun = tryConfigfsDirectMount(configFs)
+                if (ownLun != null && pollGadgetActive(ownLun)) {
+                    return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
                 }
                 Log.w(TAG, "configfs-direct mount also failed")
                 return Pair(false, "挂载失败：镜像已写入 LUN，但 gadget 未生效（UDC 未绑定或配置未链接），\nconfigfs 直接管线也未成功。\n可尝试插拔数据线后重试。")
@@ -195,58 +203,67 @@ object UsbGadgetController {
             return Pair(false, "挂载失败：LUN 已出现，但内核拒绝了该镜像路径。\n${writeRes.err.joinToString("\n")}")
         }
 
-        Log.w(TAG, "No LUN appeared after setprop — init does not handle mass_storage on this device")
-        return Pair(false, "挂载失败：内核没有创建 mass_storage LUN。\n" +
+        Log.w(TAG, "No LUN appeared after setprop — trying configfs-direct mount (self-built gadget, no adb dependency)")
+        val ownLun = tryConfigfsDirectMount(configFs)
+        if (ownLun != null && pollGadgetActive(ownLun)) {
+            return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
+        }
+        Log.w(TAG, "configfs-direct mount failed (no HAL-created LUN)")
+        return Pair(false, "挂载失败：内核没有创建 mass_storage LUN，configfs 直接管线也未成功。\n" +
             "设备可能不支持 USB 大容量存储 gadget（内核缺 f_mass_storage / CONFIG_USB_F_MASS_STORAGE）。")
     }
 
     /**
-     * ConfigFS 直接管线：供 HAL 不处理 mass_storage 的 ROM（MI 6 类原生等）
-     * 使用。内核规则：gadget 处于绑定状态时向 configuration 链接 function
-     * 会被拒（EPERM）——官方 HAL 重配置 USB 的固定套路也是先解绑再改再绑。
-     * 步骤：真正解绑（校验 UDC 已清空）→ 链接 function（源必须用绝对路径，
-     * 相对路径会 ENOENT）→ 写 LUN 属性 → 重绑。adb 会闪断几秒，属正常。
+     * 尽早建好自建 gadget（ps0）树并链接 function——必须在本次开机的
+     * 第一次 setprop sys.usb.config 之前调用！实测（一加 15 / MI 6）：
+     * ROM 的 USB 栈发生"配置回退"（如 HAL 尝试 mass_storage 失败落到
+     * MTP）后，configfs 符号链接创建会被内核门控拒绝（EPERM），而门关
+     * 之前创建的链接持续有效。之后哪怕 setprop 路径失败，回退只需
+     * 解绑 g1 → 重绑 ps0。LUN 属性写入不受门控影响。树建成后就地
+     * 复用（幂等）。详见 docs/handoff.md 门控分析。
      */
-    private fun tryConfigfsDirectMount(
-        foundLun: String, escapedPath: String, roFlag: String, cdromFlag: String,
-        restoreConfig: String
-    ): Boolean {
-        val functionDir = foundLun.substringBefore("/lun.")
-        val gadgetDir = functionDir.substringBefore("/functions/")
-        // 先把 USB 配置恢复回去（把 setprop 触发的 MTP 回退撤掉，找回 ffs.adb）
-        Shell.cmd("setprop sys.usb.config '$restoreConfig'").exec()
-        var cfgDir = ""
-        for (i in 1..6) {
-            Thread.sleep(500)
-            cfgDir = Shell.cmd(
-                "for c in $gadgetDir/configs/*/; do",
-                "  ls -l \"\$c\" 2>/dev/null | grep -q ffs.adb && { echo \"\$c\"; break; }",
-                "done"
-            ).exec().out.firstOrNull()?.trim() ?: ""
-            if (cfgDir.isNotEmpty()) break
-        }
-        if (cfgDir.isEmpty()) return false
+    private fun ensureOwnGadget(
+        escapedPath: String, roFlag: String, cdromFlag: String, configFs: String
+    ) {
+        val base = if (configFs.isNotEmpty()) "$configFs/usb_gadget/ps0" else "/config/usb_gadget/ps0"
+        val fn = "$base/functions/mass_storage.0"
+        val cfg = "$base/configs/b.1"
+        Shell.cmd(
+            "mkdir -p $fn/lun.0 $cfg 2>/dev/null || true",
+            "[ -f $base/idVendor ] || { echo 0x18d1 > $base/idVendor 2>/dev/null || true; echo 0x4ee7 > $base/idProduct 2>/dev/null || true; }",
+            // 链接只在门开时能创建（本开机周期首次 setprop 前）；已存在则跳过
+            "[ -e $cfg/mass_storage.0 ] || ln -sf $fn $cfg/mass_storage.0 2>/dev/null || true",
+            "echo '$roFlag' > $fn/lun.0/ro 2>/dev/null || true",
+            "echo '$cdromFlag' > $fn/lun.0/cdrom 2>/dev/null || true",
+            "echo 1 > $fn/lun.0/nofua 2>/dev/null || true",
+            "echo '$escapedPath' > $fn/lun.0/file 2>/dev/null || true"
+        ).exec()
+    }
+
+    /**
+     * ConfigFS 直接管线的回退执行：HAL 尝试 mass_storage 失败（通常已
+     * 回退 MTP、adb 断开）后，释放 g1 的 UDC 并绑定预建好的 ps0。
+     * 返回 ps0 的 LUN 路径（供 pollGadgetActive 验证），失败返回 null。
+     */
+    private fun tryConfigfsDirectMount(configFs: String): String? {
+        val base = if (configFs.isNotEmpty()) "$configFs/usb_gadget/ps0" else "/config/usb_gadget/ps0"
+        val g1 = if (configFs.isNotEmpty()) "$configFs/usb_gadget/g1" else "/config/usb_gadget/g1"
         val udcDev = Shell.cmd("ls /sys/class/udc/ 2>/dev/null | head -n1").exec()
             .out.firstOrNull()?.trim() ?: ""
-        if (udcDev.isEmpty()) return false
-        val fnName = functionDir.substringAfterLast("/")
+        if (udcDev.isEmpty()) return null
         val res = Shell.cmd(
-            "echo '' > $gadgetDir/UDC 2>/dev/null",
-            "if [ -n \"\$(cat $gadgetDir/UDC 2>/dev/null)\" ]; then echo 'STATUS=FAIL_UNBIND'; exit 0; fi",
-            "ln -sf $functionDir $cfgDir$fnName",
-            "echo '$roFlag' > $foundLun/ro 2>/dev/null || true",
-            "echo '$cdromFlag' > $foundLun/cdrom 2>/dev/null || true",
-            "echo 1 > $foundLun/nofua 2>/dev/null || true",
-            "echo '$escapedPath' > $foundLun/file 2>/dev/null || true",
-            "echo '$udcDev' > $gadgetDir/UDC 2>/dev/null",
+            "setprop sys.usb.config none",
             "sleep 1",
-            "if [ -n \"\$(cat $gadgetDir/UDC 2>/dev/null)\" ] && [ -e \"$cfgDir$fnName\" ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
+            "echo '' > $g1/UDC 2>/dev/null || true",
+            "sleep 0.5",
+            "echo '$udcDev' > $base/UDC 2>/dev/null || true",
+            "sleep 1",
+            "if [ -n \"\$(cat $base/UDC 2>/dev/null)\" ] && [ -e \"$base/configs/b.1/mass_storage.0\" ]; then echo 'STATUS=OK'; else echo 'STATUS=FAIL'; fi"
         ).exec()
         val ok = res.out.any { it.contains("STATUS=OK") }
         Log.d(TAG, "configfs-direct mount: ${res.out.joinToString(" | ")} err=${res.err}")
-        return ok
+        return if (ok) "$base/functions/mass_storage.0/lun.0" else null
     }
-
     /**
      * 判断 LUN 所在的 gadget 是否已真正对主机生效：
      * - configfs 路径：gadget 绑定了 UDC（`UDC` 非空）且该 function 已链进某个
@@ -312,10 +329,12 @@ object UsbGadgetController {
                     add("echo '$udcName' > $configFs/usb_gadget/g1/UDC 2>/dev/null || true")
                 }
             }
-            // Clear file from all known LUN paths using glob
-            add("for lun in /config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/kernel/config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/class/android_usb/android0/f_mass_storage/lun0 /sys/class/android_usb/android0/f_mass_storage/lun; do")
+            // Clear file from all known LUN paths using glob（含自建 ps0）
+            add("for lun in $configFs/usb_gadget/*/functions/mass_storage.*/lun.* /config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/kernel/config/usb_gadget/g1/functions/mass_storage.*/lun.* /sys/class/android_usb/android0/f_mass_storage/lun0 /sys/class/android_usb/android0/f_mass_storage/lun; do")
             add("  [ -f \"\$lun/file\" ] && echo '' > \"\$lun/file\" 2>/dev/null || true")
             add("done")
+            // 自建 ps0 gadget：解绑（树保留，下次挂载复用；g1 由 setprop 恢复）
+            add("echo '' > $configFs/usb_gadget/ps0/UDC 2>/dev/null || true")
             // configfs 直接管线：清理我们链进 configuration 的 mass_storage
             // （存在才动：解绑 → 摘链接 → 重绑）。HAL 托管的设备此时链接已被
             // HAL 摘掉，此循环为空转。
