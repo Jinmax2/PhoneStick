@@ -1,7 +1,4 @@
 <resources>
-    <!-- Default screen margins, per the Android Design guidelines. -->
-    <dimen name="activity_horizontal_margin">16dp</dimen>
+    <!-- 许可对话框的边距（dialog_license.xml），其余 margin 均由主题/布局内联定义 -->
     <dimen name="activity_vertical_margin">16dp</dimen>
-    <dimen name="activity_vertical_spacing">8dp</dimen>
-    <dimen name="text_margin">16dp</dimen>
 </resources>

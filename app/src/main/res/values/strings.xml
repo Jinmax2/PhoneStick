@@ -18,25 +18,15 @@
     <string name="host_cdrom_summary">模拟成虚拟 CD-ROM 光驱</string>
     <string name="host_serve">挂载 U 盘</string>
     <string name="host_disable">卸载 U 盘</string>
-    <string name="btn_select_image">选择镜像</string>
-    <string name="btn_create_image">创建空白磁盘镜像</string>
     <string name="host_help">PhoneStick 可将手机模拟成 USB 大容量存储设备或虚拟光驱。请确保已授予 Root 权限，且设备内核支持相应功能。</string>
 
     <!-- ImageChooserActivity & Dialogs -->
     <string name="title_activity_image_chooser">选择或创建磁盘镜像</string>
-    <string name="image_chooser_filesize_mib">%1$.1f MiB</string>
-    <string name="image_chooser_add">导入镜像</string>
     <string name="create_image_dialog_title">创建空白磁盘镜像</string>
     <string name="create_image_name_hint">镜像名称（例如 boot.img）</string>
     <string name="create_image_size_hint">容量（MB，例如 512、1024、4096）</string>
     <string name="create_image_confirm">创建镜像</string>
     <string name="cancel">取消</string>
-
-    <!-- Toast messages -->
-    <string name="host_success">现在可以在电脑上看到该设备</string>
-    <string name="host_disable_success">该设备已从电脑上消失</string>
-    <string name="host_noroot">无法获取 Root 权限</string>
-    <string name="file_picker_denied">请授予存储权限以选择或保存文件</string>
 
     <!-- 稀疏镜像空间回收 -->
     <string name="image_reclaim_space">释放未使用空间</string>
