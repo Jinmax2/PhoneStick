@@ -665,3 +665,25 @@ sed 指到 ps0。另外：**`ps-verify.sh` 硬编码扫 g1**，构造场景在�
 （`ps0/configs/b.1/mass_storage.0 -> ../../../../usb_gadget/ps0/functions/mass_storage.0`，
 相对形式）——2.4.4 的绝对路径版在此设备同样能建成，此改动是给 MI 6 伪 fs 补的，
 真 configfs 上无回归。
+
+**MI 6 回归补测（2026-11-22 晚，Android 14 / Magisk / kernel 4.4 / 伪 fs）：**
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| R8 release 包安装/启动/Root | ✅ | 覆盖安装 Success（2.4.4→2.4.5），Magisk 授权保留，Root Guard 通过 |
+| 状态差分 A（干净） | ✅ | 旧=新=UNMOUNTED |
+| 状态差分 B（file 残留未生效） | ✅ | 旧=MOUNTED（误报）、新=UNMOUNTED（正确）——**与一加 15 一致** |
+| **挂载（configfs-direct / ps0 管线）** | ✅ | 主机出盘 `sda 48M Linux File-Stor Gadget` + `sda1 vfat FAT32 PSTEST`；只读挂载后内容完整（`hello.txt`=hello from phonestick、big.bin 3MB、dir1） |
+| App 状态判定 | ✅ | 挂载期间"卸载 U 盘"按钮可点（`unmountEnabled = isMounted` 来自 getMountStatus）——用户在手机端点卸载成功，反证 App 正确识别了 ps0 挂载 |
+| 卸载全链路 | ✅ | 主机 sda 消失、adb 恢复、`sys.usb.state/config=adb`、ps0 的 UDC 解绑且 file 清空、状态回 UNMOUNTED |
+| **相对路径链接（伪 fs 实证）** | ✅ | `ps0/configs/b.1/mass_storage.0 -> ../../../../usb_gadget/ps0/functions/mass_storage.0` 在 MI 6 伪 fs 上有效、挂载可用——本轮 ensureOwnGadget 改 cd+相对路径的方向被真机证实 |
+
+**MI 6 伪 fs 的两个观察（下次排查省时间）**：
+
+1. `cat /config/usb_gadget/g1/UDC` 偶发 `Permission denied`（root 也读不到），
+   而 `cat .../lun.0/file` 正常——伪 fs 对不同节点的读权限不一致，判定时不要
+   假定 UDC 读得到。
+2. 同一时刻不同 adb 会话里，差分脚本取 `LUN_FILE`（`ls $CG/functions/mass_storage.*/lun.0/file`
+   经 glob）偶发返回空、随后又能取到。**定位伪 fs 行为要多次采样**，单次空结果
+   不代表功能有问题（本次差点误判成"状态判定在 MI 6 上失效"）。单层/多层 glob、
+   `-f`/`-e`/`-s` 测试、`ls` 路径经实测均正常。
