@@ -639,4 +639,29 @@ MainActivity 不可达分支；ImageChooser 的 Toast import、external_images p
 | pstrim 主机回归 | ✅ 7/7（`sudo tools/regression-pstrim.sh`） |
 | assembleDebug / assembleRelease(R8) | ✅ 一次通过 |
 | ACTIVE 判定 shell 函数本地差分 | ✅ 5 场景（无 UDC/缺链接/同名链接/HAL 别名/非 gadget 路径） |
-| **真机回归（MI 6 release 包：状态差分 + 挂载/卸载全链路）** | ⏳ 设备未连接，待接入后补（含 Magisk uid 变化后的 su 授权处理） |
+| **真机回归（一加 15，R8 release 包，2026-11-22）** | ✅ 见下 |
+
+**真机回归明细（一加 15 / PLK110 / Android 17 / KernelSU，release 包覆盖安装）：**
+
+| 用例 | 结果 | 证据 |
+|---|---|---|
+| R8 包安装/启动/Root | ✅ | 覆盖安装 Success（release 签名一致），启动过 Root Guard，状态判定正常 |
+| 挂载全链路（UI 驱动） | ✅ | 徽章"已挂载"，LUN=`g1/.../lun.0`（HAL 管线）；主机出盘 `sda 24G Linux File-CD Gadget`，Ventoy 分区表完整（sda1 ntfs + sda2 vfat） |
+| 数据一致性 | ✅ | LUN 头部 md5 = 镜像文件头部 md5 = `4cac94cc…` |
+| 状态差分 A（干净） | ✅ | 旧=新=UNMOUNTED |
+| 状态差分 B（file 残留未生效） | ✅ | 构造在 ps0 上（g1 被 HAL 管着，解绑会被 watchdog 竞争——见下）：旧=MOUNTED（误报）、新=UNMOUNTED（正确） |
+| 状态差分 C（真实挂载） | ✅ | 旧=新=MOUNTED |
+| 卸载按钮（P2 回归） | ✅ | 挂载态 `btnUnmount enabled="true"`，非灰 |
+| 卸载全链路 | ✅ | 徽章"未挂载"、主机 sda 变 0B 空节点（正常）、`sys.usb.state=adb` 还原 |
+
+**构造 B 场景的坑（记录给下次）**：HAL 活跃时（sys.usb.config 含 mass_storage）
+不能在 g1 上手动解绑/摘链接——`echo '' > UDC` 与 HAL watchdog 竞争返回
+EBUSY，HAL 瞬间重绑，`rm -f` 链接在 bound 态被 configfs 静默拒绝。改在自建
+ps0 上构造（file 残留 + UDC 未绑 + 无绑定），并把差分脚本设备副本的 `CG`
+sed 指到 ps0。另外：**`ps-verify.sh` 硬编码扫 g1**，构造场景在其它 gadget 上
+时要先改它的 CG。
+
+**顺带验证**：`ensureOwnGadget` 的 cd+相对路径链接在一加 15 真机建成
+（`ps0/configs/b.1/mass_storage.0 -> ../../../../usb_gadget/ps0/functions/mass_storage.0`，
+相对形式）——2.4.4 的绝对路径版在此设备同样能建成，此改动是给 MI 6 伪 fs 补的，
+真 configfs 上无回归。
