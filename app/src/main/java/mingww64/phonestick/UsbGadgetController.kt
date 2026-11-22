@@ -196,6 +196,8 @@ object UsbGadgetController {
                 if (ownLun != null && pollGadgetActive(ownLun)) {
                     return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
                 }
+                Shell.cmd("setprop sys.usb.config adb").exec()
+                MountDiag.write("lun-stale", "HAL 未生效的 LUN 状态下，configfs-direct 回退失败")
                 Log.w(TAG, "configfs-direct mount also failed")
                 return Pair(false, "挂载失败：镜像已写入 LUN，但 gadget 未生效（UDC 未绑定或配置未链接），\nconfigfs 直接管线也未成功。\n可尝试插拔数据线后重试。")
             }
@@ -204,11 +206,13 @@ object UsbGadgetController {
         }
 
         Log.w(TAG, "No LUN appeared after setprop — trying configfs-direct mount (self-built gadget, no adb dependency)")
-        val ownLun = tryConfigfsDirectMount(configFs)
-        if (ownLun != null && pollGadgetActive(ownLun)) {
-            return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
-        }
+                val ownLun = tryConfigfsDirectMount(configFs)
+                if (ownLun != null && pollGadgetActive(ownLun)) {
+                    return Pair(true, "挂载成功（ConfigFS 直接管线，$ownLun）")
+                }
+                Shell.cmd("setprop sys.usb.config adb").exec()
         Log.w(TAG, "configfs-direct mount failed (no HAL-created LUN)")
+        MountDiag.write("no-lun", "setprop 后无 LUN 出现，configfs-direct 回退失败（无开发者选项场景主路径）")
         return Pair(false, "挂载失败：内核没有创建 mass_storage LUN，configfs 直接管线也未成功。\n" +
             "设备可能不支持 USB 大容量存储 gadget（内核缺 f_mass_storage / CONFIG_USB_F_MASS_STORAGE）。")
     }
@@ -251,9 +255,10 @@ object UsbGadgetController {
         val udcDev = Shell.cmd("ls /sys/class/udc/ 2>/dev/null | head -n1").exec()
             .out.firstOrNull()?.trim() ?: ""
         if (udcDev.isEmpty()) return null
+        // 关键：全程不碰 sys.usb.config（setprop 会触发 init/HAL 状态机，
+        // 解绑会被抢绑、门控会被武装——这是此前失败的根源）。直接裸操作：
+        // 解绑 g1（init 对无属性变化的解绑不反应）→ 绑 ps0。
         val res = Shell.cmd(
-            "setprop sys.usb.config none",
-            "sleep 1",
             "echo '' > $g1/UDC 2>/dev/null || true",
             "sleep 0.5",
             "echo '$udcDev' > $base/UDC 2>/dev/null || true",
@@ -262,6 +267,10 @@ object UsbGadgetController {
         ).exec()
         val ok = res.out.any { it.contains("STATUS=OK") }
         Log.d(TAG, "configfs-direct mount: ${res.out.joinToString(" | ")} err=${res.err}")
+        if (!ok) {
+            // 绑定失败：恢复原 USB 配置（撤掉 sys.usb.config=none 的残留，找回 adb）
+            Shell.cmd("setprop sys.usb.config adb").exec()
+        }
         return if (ok) "$base/functions/mass_storage.0/lun.0" else null
     }
     /**
@@ -339,6 +348,7 @@ object UsbGadgetController {
             // （存在才动：解绑 → 摘链接 → 重绑）。HAL 托管的设备此时链接已被
             // HAL 摘掉，此循环为空转。
             add("for g in $configFs/usb_gadget/*/; do")
+            add("  case \"\$g\" in *usb_gadget/ps0/) continue;; esac")
             add("  for c in \"\$g\"configs/*/; do")
             add("    if [ -e \"\${c}mass_storage.0\" ]; then")
             add("      echo '' > \"\$g\"UDC 2>/dev/null")
